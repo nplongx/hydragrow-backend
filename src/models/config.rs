@@ -14,7 +14,7 @@ pub struct DeviceConfig {
     pub temp_max: f64,
     pub control_mode: String,
     pub is_enabled: i64, // SQLite không có boolean, dùng INTEGER (0, 1)
-    pub last_updated: DateTime<Utc>,
+    pub last_updated: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -24,7 +24,7 @@ pub struct SensorCalibration {
     pub ph_v4: f64,
     pub ec_factor: f64,
     pub temp_offset: f64,
-    pub last_calibrated: DateTime<Utc>,
+    pub last_calibrated: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -35,7 +35,7 @@ pub struct PumpCalibration {
     pub flow_rate_ml_per_sec: f64,
     pub min_activation_sec: f64,
     pub max_activation_sec: f64,
-    pub last_calibrated: DateTime<Utc>,
+    pub last_calibrated: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -48,7 +48,7 @@ pub struct DosingCalibration {
     pub mixing_delay_sec: i64,
     pub ec_step_ratio: f64,
     pub ph_step_ratio: f64,
-    pub last_calibrated: DateTime<Utc>,
+    pub last_calibrated: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -62,6 +62,16 @@ pub struct SafetyConfig {
     pub max_dose_per_cycle: f64,
     pub cooldown_sec: i64,
     pub max_dose_per_hour: f64,
+
+    pub water_level_critical_min: f64,
+    pub water_level_target: f64,
+    pub water_level_max: f64,
+
+    pub max_refill_cycles_per_hour: i64,
+    pub max_drain_cycles_per_hour: i64,
+    pub max_refill_duration_sec: i64,
+    pub max_drain_duration_sec: i64,
+
     pub emergency_shutdown: i64,
-    pub last_updated: DateTime<Utc>,
+    pub last_updated: String,
 }

@@ -1,6 +1,7 @@
 use crate::models::{config::SafetyConfig, sensor::SensorData};
 use crate::{AlertMessage, AppState};
 use anyhow::Result;
+use chrono::Utc;
 use std::sync::Arc;
 use tracing::{error, instrument, warn};
 
@@ -19,7 +20,7 @@ pub async fn check_and_trigger_alerts(
         r#"
         SELECT 
             device_id, max_ec_limit, min_ph_limit, max_ph_limit, max_ec_delta, max_ph_delta,
-            max_dose_per_cycle, cooldown_sec, max_dose_per_hour, emergency_shutdown,
+            max_dose_per_cycle, cooldown_sec, max_dose_per_hour, water_level_critical_min, water_level_target, water_level_max, max_refill_cycles_per_hour, max_drain_cycles_per_hour, max_refill_duration_sec, max_drain_duration_sec, emergency_shutdown,
             last_updated as "last_updated: _"
         FROM safety_config 
         WHERE device_id = ?
@@ -45,6 +46,7 @@ pub async fn check_and_trigger_alerts(
             metric: "ec".to_string(),
             value: sensor_data.ec_value,
             severity: "critical".to_string(),
+            timestamp: Utc::now().to_string(),
         });
     }
 
@@ -56,6 +58,7 @@ pub async fn check_and_trigger_alerts(
             metric: "ph".to_string(),
             value: sensor_data.ph_value,
             severity: "critical".to_string(),
+            timestamp: Utc::now().to_string(),
         });
     } else if sensor_data.ph_value > config.max_ph_limit {
         alerts.push(AlertMessage {
@@ -64,6 +67,7 @@ pub async fn check_and_trigger_alerts(
             metric: "ph".to_string(),
             value: sensor_data.ph_value,
             severity: "critical".to_string(),
+            timestamp: Utc::now().to_string(),
         });
     }
 
@@ -77,7 +81,9 @@ pub async fn check_and_trigger_alerts(
         );
 
         // Gửi qua channel. Bỏ qua lỗi nếu không có client nào đang kết nối (WS trống)
-        let _ = app_state.alert_sender.send(alert);
+        if let Ok(json_str) = serde_json::to_string(&alert) {
+            let _ = app_state.alert_sender.send(json_str);
+        }
 
         // NẾU vi phạm quá nghiêm trọng (hoặc emergency_shutdown == 1), ra lệnh ngắt bơm
         if config.emergency_shutdown == 1 {
@@ -90,4 +96,43 @@ pub async fn check_and_trigger_alerts(
     }
 
     Ok(())
+}
+
+pub fn check_alerts(sensor: &SensorData, safety: &SafetyConfig) -> Vec<AlertMessage> {
+    let mut alerts = Vec::new();
+
+    if sensor.ec_value > safety.max_ec_limit {
+        alerts.push(AlertMessage {
+            alert_type: "EC_HIGH".into(),
+            device_id: sensor.device_id.clone(),
+            metric: "ec".into(),
+            value: sensor.ec_value,
+            severity: "critical".into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        });
+    }
+
+    if sensor.ph_value < safety.min_ph_limit {
+        alerts.push(AlertMessage {
+            alert_type: "PH_LOW".into(),
+            device_id: sensor.device_id.clone(),
+            metric: "ph".into(),
+            value: sensor.ph_value,
+            severity: "warning".into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        });
+    }
+
+    if sensor.ph_value > safety.max_ph_limit {
+        alerts.push(AlertMessage {
+            alert_type: "PH_HIGH".into(),
+            device_id: sensor.device_id.clone(),
+            metric: "ph".into(),
+            value: sensor.ph_value,
+            severity: "warning".into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        });
+    }
+
+    alerts
 }

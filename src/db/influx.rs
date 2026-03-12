@@ -1,65 +1,71 @@
-use crate::db::DbResult;
-use crate::models::sensor::SensorData;
-use chrono::{DateTime, Utc};
+use anyhow::{Context, Result};
 use futures_util::stream;
-use influxdb2::{
-    Client,
-    models::{DataPoint, Query},
-};
+use influxdb2::Client;
+use influxdb2::models::DataPoint;
 use tracing::{error, instrument};
 
+use crate::models::sensor::{PumpStatus, SensorData, SensorDataRow};
+
+/// Ghi dữ liệu cảm biến mới vào InfluxDB
 #[instrument(skip(client, data))]
-pub async fn write_sensor_data(client: &Client, bucket: &str, data: &SensorData) -> DbResult<()> {
-    // Build DataPoint theo schema measurement: sensor_data
+pub async fn write_sensor_data(client: &Client, bucket: &str, data: &SensorData) -> Result<()> {
+    // 1. Chuyển đổi struct PumpStatus thành chuỗi JSON
+    let pump_status_json = serde_json::to_string(&data.pump_status)
+        .context("Failed to serialize pump_status to JSON")?;
+
+    // 2. Build DataPoint
+    // Lưu ý: Nếu data.timestamp rỗng hoặc lỗi, InfluxDB sẽ tự lấy thời gian hiện tại lúc insert
     let point = DataPoint::builder("sensor_data")
         .tag("device_id", &data.device_id)
         .field("ec_value", data.ec_value)
         .field("ph_value", data.ph_value)
         .field("temp_value", data.temp_value)
         .field("water_level", data.water_level)
-        .field("pump_status", data.pump_status.as_str())
-        .timestamp(data.timestamp.timestamp_nanos_opt().unwrap_or(0))
+        .field("pump_status", pump_status_json)
         .build()
-        .map_err(|e| crate::db::DbError::ParseError(e.to_string()))?;
+        .context("Failed to build InfluxDB DataPoint")?;
 
-    // Dùng stream::iter vì client.write yêu cầu một Stream
-    client.write(bucket, stream::iter(vec![point])).await?;
+    // 3. Thực thi việc ghi
+    client
+        .write(bucket, stream::iter(vec![point]))
+        .await
+        .context("Failed to write to InfluxDB")?;
 
     Ok(())
 }
 
+/// Lấy record mới nhất của một thiết bị (Rất cần cho Valve Guard)
 #[instrument(skip(client))]
-pub async fn get_sensor_history(
+pub async fn get_latest_sensor_data(
     client: &Client,
     bucket: &str,
     device_id: &str,
-    start_rfc3339: &str,
-    end_rfc3339: &str,
-    limit: usize,
-) -> DbResult<Vec<SensorData>> {
-    // Dùng hàm time(v: "...") của Flux để parse chuỗi string thành định dạng thời gian chuẩn
+) -> Result<SensorData> {
     let flux_query = format!(
         r#"
         from(bucket: "{}")
-            |> range(start: time(v: "{}"), stop: time(v: "{}"))
+            |> range(start: -1h) // Chỉ quét trong 1h gần nhất để tối ưu
             |> filter(fn: (r) => r["_measurement"] == "sensor_data" and r["device_id"] == "{}")
             |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
             |> sort(columns: ["_time"], desc: true)
-            |> limit(n: {})
+            |> limit(n: 1)
         "#,
-        bucket, start_rfc3339, end_rfc3339, device_id, limit
+        bucket, device_id
     );
 
-    let query_obj = Query::new(flux_query);
+    let query_obj = influxdb2::models::Query::new(flux_query);
+    let tables = client
+        .query::<SensorDataRow>(Some(query_obj))
+        .await
+        .context("Flux query failed")?;
 
-    // Gọi client query. Kết quả trả về là một danh sách các "Table"
-    let tables = client.query::<SensorData>(Some(query_obj)).await?;
-
-    let mut history = Vec::new();
-
-    for record in tables {
-        history.push(record);
+    // Parse kết quả từ InfluxDB (Khá thủ công vì cấu trúc trả về của InfluxDB Rust Client)
+    if let Some(table) = tables.first() {
+        return Ok(table.to_owned().into());
     }
 
-    Ok(history)
+    Err(anyhow::anyhow!(
+        "No sensor data found for device: {}",
+        device_id
+    ))
 }

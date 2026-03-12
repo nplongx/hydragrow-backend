@@ -50,16 +50,31 @@ CREATE TABLE dosing_calibration (
 
 CREATE TABLE safety_config (
     device_id TEXT NOT NULL PRIMARY KEY,
+
     max_ec_limit REAL NOT NULL,
     min_ph_limit REAL NOT NULL,
     max_ph_limit REAL NOT NULL,
     max_ec_delta REAL NOT NULL,
     max_ph_delta REAL NOT NULL,
+
     max_dose_per_cycle REAL NOT NULL,
-    cooldown_sec INTEGER NOT NULL,
     max_dose_per_hour REAL NOT NULL,
+    cooldown_sec INTEGER NOT NULL,
+
+    water_level_critical_min REAL NOT NULL,
+    water_level_target REAL NOT NULL,
+    water_level_max REAL NOT NULL,
+
+    max_refill_cycles_per_hour INTEGER NOT NULL,
+    max_drain_cycles_per_hour INTEGER NOT NULL,
+
+    max_refill_duration_sec INTEGER NOT NULL,
+    max_drain_duration_sec INTEGER NOT NULL,
+
     emergency_shutdown INTEGER NOT NULL DEFAULT 0,
+
     last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
     FOREIGN KEY (device_id) REFERENCES device_config(device_id)
 );
 

@@ -8,7 +8,16 @@ use futures_util::future::{LocalBoxFuture, Ready, ready};
 use std::rc::Rc;
 use std::sync::Arc; // Phụ thuộc vào khai báo AppState ở main.rs
 
-pub struct ApiKeyAuth;
+pub struct ApiKeyAuth {
+    api_key: String,
+}
+
+impl ApiKeyAuth {
+    /// Khởi tạo Middleware với API Key lấy từ biến môi trường lúc start server
+    pub fn new(api_key: String) -> Self {
+        Self { api_key }
+    }
+}
 
 impl<S, B> Transform<S, ServiceRequest> for ApiKeyAuth
 where

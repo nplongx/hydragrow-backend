@@ -18,11 +18,10 @@ pub async fn get_config(
     // Tận dụng hàm get_device_config đã viết ở src/db/sqlite.rs
     match crate::db::sqlite::get_device_config(&app_state.sqlite_pool, &device_id).await {
         Ok(config) => HttpResponse::Ok().json(config),
-        Err(crate::db::DbError::NotFound(_)) => HttpResponse::NotFound()
-            .json(json!({"error": "Configuration not found for this device"})),
         Err(e) => {
-            error!("Failed to fetch config from DB: {:?}", e);
-            HttpResponse::InternalServerError().json(json!({"error": "Database error"}))
+            tracing::warn!("Config not found or DB error: {:?}", e);
+            HttpResponse::NotFound()
+                .json(json!({"error": "Configuration not found for this device"}))
         }
     }
 }
@@ -43,10 +42,11 @@ pub async fn update_config(
     }
 
     // Cập nhật timestamp mới nhất
-    config.last_updated = chrono::Utc::now();
+    // Cập nhật timestamp mới nhất
+    config.last_updated = chrono::Utc::now().to_rfc3339();
 
-    // 1. Lưu vào SQLite (sử dụng hàm upsert đã viết ở db/sqlite.rs)
-    if let Err(e) = crate::db::sqlite::update_device_config(&app_state.sqlite_pool, &config).await {
+    // 1. Lưu vào SQLite
+    if let Err(e) = crate::db::sqlite::upsert_device_config(&app_state.sqlite_pool, &config).await {
         error!("Failed to update config in DB: {:?}", e);
         return HttpResponse::InternalServerError()
             .json(json!({"error": "Failed to save configuration"}));

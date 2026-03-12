@@ -1,96 +1,113 @@
-use crate::AppState;
 use actix_web::{HttpResponse, Responder, web};
-use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
+use tracing::{error, instrument};
 
-#[derive(Deserialize)]
+use crate::AppState;
+use crate::db::influx::get_latest_sensor_data;
+use crate::models::sensor::SensorDataRow;
+
+/// Tham số Query String cho API lịch sử (VD: ?range=24h)
+#[derive(Deserialize, Debug)]
 pub struct HistoryQuery {
-    pub start: Option<String>, // RFC3339
-    pub end: Option<String>,
-    pub limit: Option<usize>,
+    pub range: Option<String>,
 }
 
+/// GET /api/devices/{device_id}/sensors/latest
+/// Lấy trạng thái và thông số cảm biến mới nhất của thiết bị
+#[instrument(skip(app_state))]
 pub async fn get_latest(
     path: web::Path<String>,
     app_state: web::Data<Arc<AppState>>,
 ) -> impl Responder {
     let device_id = path.into_inner();
 
-    // lấy dữ liệu trong 24h gần nhất
-    let end = Utc::now().to_rfc3339();
-    let start = (Utc::now() - Duration::hours(24)).to_rfc3339();
-
-    match crate::db::influx::get_sensor_history(
+    match get_latest_sensor_data(
         &app_state.influx_client,
         &app_state.influx_bucket,
         &device_id,
-        &start,
-        &end,
-        1, // chỉ lấy record mới nhất
     )
     .await
     {
-        Ok(mut history) => {
-            if let Some(data) = history.pop() {
-                HttpResponse::Ok().json(data)
-            } else {
-                HttpResponse::NotFound()
-                    .json(json!({"error": "No sensor data found for this device"}))
-            }
-        }
-
+        Ok(data) => HttpResponse::Ok().json(json!({
+            "status": "success",
+            "data": data
+        })),
         Err(e) => {
-            tracing::error!("Database query error: {:?}", e);
-            HttpResponse::InternalServerError().json(json!({"error": "Database error"}))
+            error!(
+                "Lỗi khi lấy dữ liệu sensor mới nhất cho {}: {:?}",
+                device_id, e
+            );
+            HttpResponse::NotFound().json(json!({
+                "error": "Not Found",
+                "message": "Không tìm thấy dữ liệu cho thiết bị này"
+            }))
         }
     }
 }
 
+/// GET /api/devices/{device_id}/sensors/history
+/// Lấy dữ liệu lịch sử để vẽ biểu đồ trên Frontend
+#[instrument(skip(app_state))]
 pub async fn get_history(
     path: web::Path<String>,
     query: web::Query<HistoryQuery>,
     app_state: web::Data<Arc<AppState>>,
 ) -> impl Responder {
     let device_id = path.into_inner();
+    // Mặc định lấy 24h qua nếu user không truyền param
+    let range = query.range.clone().unwrap_or_else(|| "24h".to_string());
 
-    // mặc định 24h
-    let end = query.end.clone().unwrap_or_else(|| Utc::now().to_rfc3339());
+    // CHÚ Ý TỐI ƯU (Downsampling):
+    // Thiết bị gửi 1s/lần -> 1 ngày có 86,400 điểm. Nếu trả hết về Frontend, trình duyệt sẽ bị treo (crash).
+    // Ta dùng aggregateWindow(every: 5m, fn: mean) để tính trung bình mỗi 5 phút thành 1 điểm.
+    let flux_query = format!(
+        r#"
+        from(bucket: "{}")
+            |> range(start: -{})
+            |> filter(fn: (r) => r["_measurement"] == "sensor_data" and r["device_id"] == "{}")
+            |> filter(fn: (r) => r["_field"] == "ec_value" or r["_field"] == "ph_value" or r["_field"] == "temp_value" or r["_field"] == "water_level")
+            |> aggregateWindow(every: 5m, fn: mean, createEmpty: false)
+            |> yield(name: "mean")
+        "#,
+        app_state.influx_bucket, range, device_id
+    );
 
-    let start = query
-        .start
-        .clone()
-        .unwrap_or_else(|| (Utc::now() - Duration::days(1)).to_rfc3339());
+    let query_obj = influxdb2::models::Query::new(flux_query);
 
-    // giới hạn để tránh payload quá lớn
-    let limit = query.limit.unwrap_or(100).clamp(1, 1000);
-
-    match crate::db::influx::get_sensor_history(
-        &app_state.influx_client,
-        &app_state.influx_bucket,
-        &device_id,
-        &start,
-        &end,
-        limit,
-    )
-    .await
+    match app_state
+        .influx_client
+        .query::<SensorDataRow>(Some(query_obj))
+        .await
     {
-        Ok(history) => HttpResponse::Ok().json(history),
-
+        Ok(tables) => {
+            // Trả raw data từ InfluxDB về.
+            // Ở Frontend, bạn sẽ lặp qua mảng này để map vào thư viện vẽ Chart (như Recharts, Chart.js).
+            HttpResponse::Ok().json(json!({
+                "status": "success",
+                "data": tables
+            }))
+        }
         Err(e) => {
-            tracing::error!("Failed to fetch history: {:?}", e);
-            HttpResponse::InternalServerError()
-                .json(json!({"error": "Failed to fetch historical data"}))
+            error!(
+                "Lỗi khi query biểu đồ từ InfluxDB cho {}: {:?}",
+                device_id, e
+            );
+            HttpResponse::InternalServerError().json(json!({
+                "error": "Database Error",
+                "message": "Không thể truy xuất dữ liệu lịch sử"
+            }))
         }
     }
 }
 
+// Hàm khởi tạo để nhúng vào main.rs
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/sensors")
-            .route("/{device_id}/latest", web::get().to(get_latest))
-            .route("/{device_id}/history", web::get().to(get_history)),
+        web::scope("/api/devices/{device_id}/sensors")
+            .route("/latest", web::get().to(get_latest))
+            .route("/history", web::get().to(get_history)),
     );
 }
 
