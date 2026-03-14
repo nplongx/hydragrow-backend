@@ -17,10 +17,7 @@ pub struct HistoryQuery {
 /// GET /api/devices/{device_id}/sensors/latest
 /// Lấy trạng thái và thông số cảm biến mới nhất của thiết bị
 #[instrument(skip(app_state))]
-pub async fn get_latest(
-    path: web::Path<String>,
-    app_state: web::Data<Arc<AppState>>,
-) -> impl Responder {
+pub async fn get_latest(path: web::Path<String>, app_state: web::Data<AppState>) -> impl Responder {
     let device_id = path.into_inner();
 
     match get_latest_sensor_data(
@@ -53,7 +50,7 @@ pub async fn get_latest(
 pub async fn get_history(
     path: web::Path<String>,
     query: web::Query<HistoryQuery>,
-    app_state: web::Data<Arc<AppState>>,
+    app_state: web::Data<AppState>,
 ) -> impl Responder {
     let device_id = path.into_inner();
     // Mặc định lấy 24h qua nếu user không truyền param
@@ -110,4 +107,3 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route("/history", web::get().to(get_history)),
     );
 }
-

@@ -7,7 +7,7 @@ use tracing::{error, instrument, warn};
 
 #[instrument(skip(app_state, sensor_data))]
 pub async fn check_and_trigger_alerts(
-    app_state: &Arc<AppState>,
+    app_state: &AppState,
     sensor_data: &SensorData,
 ) -> Result<()> {
     let device_id = &sensor_data.device_id;
@@ -19,9 +19,10 @@ pub async fn check_and_trigger_alerts(
         SafetyConfig,
         r#"
         SELECT 
-            device_id, max_ec_limit, min_ph_limit, max_ph_limit, max_ec_delta, max_ph_delta,
-            max_dose_per_cycle, cooldown_sec, max_dose_per_hour, water_level_critical_min, water_level_target, water_level_max, max_refill_cycles_per_hour, max_drain_cycles_per_hour, max_refill_duration_sec, max_drain_duration_sec, emergency_shutdown,
-            last_updated as "last_updated: _"
+            device_id, max_ec_limit, min_ec_limit, min_ph_limit, max_ph_limit, max_ec_delta, max_ph_delta,
+            max_dose_per_cycle, cooldown_sec, max_dose_per_hour, water_level_critical_min,
+            max_refill_cycles_per_hour, max_drain_cycles_per_hour, max_refill_duration_sec,
+            max_drain_duration_sec, min_temp_limit, max_temp_limit, emergency_shutdown, last_updated
         FROM safety_config 
         WHERE device_id = ?
         "#,

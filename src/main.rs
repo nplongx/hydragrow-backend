@@ -40,6 +40,7 @@ pub struct AppState {
 async fn main() -> anyhow::Result<()> {
     // 1. Load biến môi trường từ file .env
     dotenv().ok();
+    env_logger::init();
 
     // 2. Khởi tạo hệ thống Log (Tracing) cực kỳ mạnh mẽ
     let subscriber = FmtSubscriber::builder()
@@ -73,8 +74,12 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "1883".to_string())
         .parse()?;
 
-    let mut mqttoptions = MqttOptions::new("rust_backend_server", mqtt_host, mqtt_port);
-    mqttoptions.set_keep_alive(Duration::from_secs(5));
+    let mqtt_client_id =
+        env::var("MQTT_CLIENT_ID").unwrap_or_else(|_| "rust_backend_server".to_string());
+
+    let mut mqttoptions = MqttOptions::new(mqtt_client_id, mqtt_host, mqtt_port);
+    mqttoptions.set_keep_alive(Duration::from_secs(30));
+    mqttoptions.set_clean_session(false);
 
     let (mqtt_client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
     info!("Đã khởi tạo MQTT Client");
@@ -83,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
     let (alert_sender, _) = broadcast::channel(100);
     let api_key = std::env::var("API_KEY").context("API_KEY must be set in .env")?;
     // 7. Đóng gói tất cả vào AppState (dùng Arc để chia sẻ an toàn giữa các thread)
-    let app_state = Arc::new(AppState {
+    let app_state = web::Data::new(AppState {
         sqlite_pool,
         influx_client,
         influx_bucket,
@@ -113,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
                 Ok(_) => {} // Bỏ qua các sự kiện nội bộ khác của MQTT (Ping, Ack...)
                 Err(e) => {
                     error!(
-                        "Mất kết nối MQTT, thử lại sau 5 giây... Chi tiết lỗi: {:?}",
+                        "Mất kết nối MQTT, thử lại sau 30 giây... Chi tiết lỗi: {:?}",
                         e
                     );
                     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -139,7 +144,7 @@ async fn main() -> anyhow::Result<()> {
         let rate_limit_middleware = api::middleware::rate_limit::RateLimiter::new(60, 60);
 
         App::new()
-            .app_data(web::Data::from(app_state.clone()))
+            .app_data(app_state.clone())
             .wrap(rate_limit_middleware)
             .wrap(auth_middleware)
             .configure(api::control::init_routes)

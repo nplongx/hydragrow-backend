@@ -1,3 +1,4 @@
+use actix_web::web;
 use rumqttc::Publish;
 use serde::Deserialize;
 use serde_json::json;
@@ -17,7 +18,7 @@ struct DeviceStatusPayload {
 /// LƯU Ý: Không bao giờ được dùng .unwrap() hay return Err() gây panic ở đây,
 /// vì nó sẽ làm sập (crash) toàn bộ vòng lặp sự kiện MQTT của hệ thống.
 #[instrument(skip(app_state, publish))]
-pub async fn process_message(publish: Publish, app_state: Arc<AppState>) {
+pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
     let topic = publish.topic.clone();
     let payload_bytes = publish.payload;
 
@@ -44,7 +45,7 @@ pub async fn process_message(publish: Publish, app_state: Arc<AppState>) {
     }
 }
 
-async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: Arc<AppState>) {
+async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
     // 1. Parse JSON payload
     let sensor_data: SensorData = match serde_json::from_slice(payload) {
         Ok(data) => data,
@@ -89,7 +90,7 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: Arc<Ap
     let _ = app_state.alert_sender.send(ws_msg.to_string());
 }
 
-async fn handle_device_status(device_id: String, payload: &[u8], app_state: Arc<AppState>) {
+async fn handle_device_status(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
     let status: DeviceStatusPayload = match serde_json::from_slice(payload) {
         Ok(data) => data,
         Err(e) => {
@@ -112,4 +113,3 @@ async fn handle_device_status(device_id: String, payload: &[u8], app_state: Arc<
 
     let _ = app_state.alert_sender.send(ws_msg.to_string());
 }
-

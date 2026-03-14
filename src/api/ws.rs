@@ -10,7 +10,7 @@ use crate::AppState;
 pub async fn ws_handler(
     req: HttpRequest,
     body: web::Payload,
-    app_state: web::Data<Arc<AppState>>,
+    app_state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     // Nâng cấp kết nối HTTP lên WebSocket
     let (response, mut session, mut msg_stream) = actix_ws::handle(&req, body)?;

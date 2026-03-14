@@ -16,7 +16,7 @@ pub struct CommandPayload {
 
 #[instrument(skip(app_state))]
 pub async fn send_command(
-    app_state: &Arc<AppState>,
+    app_state: &AppState,
     device_id: &str,
     payload: &CommandPayload,
 ) -> Result<()> {
@@ -34,7 +34,7 @@ pub async fn send_command(
 }
 
 /// Helper function kích hoạt dừng khẩn cấp
-pub async fn trigger_emergency_stop(app_state: &Arc<AppState>, device_id: &str) -> Result<()> {
+pub async fn trigger_emergency_stop(app_state: &AppState, device_id: &str) -> Result<()> {
     let payload = CommandPayload {
         action: "emergency_stop".to_string(),
         pump: None,

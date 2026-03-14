@@ -7,11 +7,10 @@ pub struct DeviceConfig {
     pub device_id: String,
     pub ec_target: f64,
     pub ec_tolerance: f64,
-    pub ph_min: f64,
-    pub ph_max: f64,
+    pub ph_target: f64,
     pub ph_tolerance: f64,
-    pub temp_min: f64,
-    pub temp_max: f64,
+    pub temp_target: f64,
+    pub temp_tolerance: f64,
     pub control_mode: String,
     pub is_enabled: i64, // SQLite không có boolean, dùng INTEGER (0, 1)
     pub last_updated: String,
@@ -55,6 +54,7 @@ pub struct DosingCalibration {
 pub struct SafetyConfig {
     pub device_id: String,
     pub max_ec_limit: f64,
+    pub min_ec_limit: f64,
     pub min_ph_limit: f64,
     pub max_ph_limit: f64,
     pub max_ec_delta: f64,
@@ -63,15 +63,31 @@ pub struct SafetyConfig {
     pub cooldown_sec: i64,
     pub max_dose_per_hour: f64,
 
-    pub water_level_critical_min: f64,
-    pub water_level_target: f64,
-    pub water_level_max: f64,
+    pub water_level_critical_min: f64, // Mức nước nguy hiểm (cạn quá mức -> cháy bơm)
+    pub max_refill_cycles_per_hour: i64, // Chống kẹt phao (bơm liên tục)
+    pub max_drain_cycles_per_hour: i64, // Chống rò rỉ (xả liên tục)
+    pub max_refill_duration_sec: i64,  // Chống tràn (thời gian bơm max 1 lần)
+    pub max_drain_duration_sec: i64,   // Chống kẹt van xả
 
-    pub max_refill_cycles_per_hour: i64,
-    pub max_drain_cycles_per_hour: i64,
-    pub max_refill_duration_sec: i64,
-    pub max_drain_duration_sec: i64,
+    pub min_temp_limit: f64,
+    pub max_temp_limit: f64,
 
     pub emergency_shutdown: i64,
+
+    // XÓA: water_level_target và water_level_max (Vì đã sang WaterConfig)
     pub last_updated: String,
+}
+
+// Cập nhật lại WaterConfig cho khớp 100% với React State
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WaterConfig {
+    pub device_id: String, // Thêm cho chuẩn form
+    pub water_level_min: f64,
+    pub water_level_target: f64,
+    pub water_level_max: f64,
+    pub water_level_drain: f64,
+    pub circulation_mode: String,
+    pub circulation_on_sec: i64,
+    pub circulation_off_sec: i64,
+    pub last_updated: String, // Thêm để tracking
 }

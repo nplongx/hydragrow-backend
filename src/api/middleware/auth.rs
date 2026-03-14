@@ -55,9 +55,7 @@ where
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        let app_state = req
-            .app_data::<actix_web::web::Data<Arc<AppState>>>()
-            .unwrap();
+        let app_state = req.app_data::<actix_web::web::Data<AppState>>().unwrap();
         let expected_api_key = &app_state.api_key;
 
         let provided_key = req
