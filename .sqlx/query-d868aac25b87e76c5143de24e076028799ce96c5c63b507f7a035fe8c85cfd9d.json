@@ -1,0 +1,128 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT \n            device_id, max_ec_limit, min_ec_limit, min_ph_limit, max_ph_limit, max_ec_delta, max_ph_delta,\n            max_dose_per_cycle, cooldown_sec, max_dose_per_hour, water_level_critical_min,\n            max_refill_cycles_per_hour, max_drain_cycles_per_hour, max_refill_duration_sec,\n            max_drain_duration_sec, min_temp_limit, max_temp_limit, emergency_shutdown, last_updated\n        FROM safety_config \n        WHERE device_id = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "device_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "max_ec_limit",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "min_ec_limit",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "min_ph_limit",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_ph_limit",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_ec_delta",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_ph_delta",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_dose_per_cycle",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "cooldown_sec",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_dose_per_hour",
+        "ordinal": 9,
+        "type_info": "Float"
+      },
+      {
+        "name": "water_level_critical_min",
+        "ordinal": 10,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_refill_cycles_per_hour",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_drain_cycles_per_hour",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_refill_duration_sec",
+        "ordinal": 13,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_drain_duration_sec",
+        "ordinal": 14,
+        "type_info": "Integer"
+      },
+      {
+        "name": "min_temp_limit",
+        "ordinal": 15,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_temp_limit",
+        "ordinal": 16,
+        "type_info": "Float"
+      },
+      {
+        "name": "emergency_shutdown",
+        "ordinal": 17,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_updated",
+        "ordinal": 18,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d868aac25b87e76c5143de24e076028799ce96c5c63b507f7a035fe8c85cfd9d"
+}

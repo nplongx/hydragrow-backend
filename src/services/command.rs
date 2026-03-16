@@ -2,7 +2,6 @@ use crate::AppState;
 use anyhow::{Context, Result};
 use rumqttc::QoS;
 use serde::Deserialize;
-use std::sync::Arc;
 use tracing::{info, instrument};
 
 #[derive(serde::Serialize, Deserialize, Debug)]
@@ -20,7 +19,7 @@ pub async fn send_command(
     device_id: &str,
     payload: &CommandPayload,
 ) -> Result<()> {
-    let topic = format!("hydro/{}/command", device_id);
+    let topic = format!("AGITECH/{}/command", device_id);
     let payload_bytes = serde_json::to_vec(payload)?;
 
     app_state
@@ -33,7 +32,6 @@ pub async fn send_command(
     Ok(())
 }
 
-/// Helper function kích hoạt dừng khẩn cấp
 pub async fn trigger_emergency_stop(app_state: &AppState, device_id: &str) -> Result<()> {
     let payload = CommandPayload {
         action: "emergency_stop".to_string(),

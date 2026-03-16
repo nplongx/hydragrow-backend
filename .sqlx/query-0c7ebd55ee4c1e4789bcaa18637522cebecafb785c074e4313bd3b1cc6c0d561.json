@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT * FROM dosing_calibration WHERE device_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "device_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "tank_volume_l",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "ec_gain_per_ml",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "ph_shift_up_per_ml",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "ph_shift_down_per_ml",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "active_mixing_sec",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "sensor_stabilize_sec",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "ec_step_ratio",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "ph_step_ratio",
+        "ordinal": 8,
+        "type_info": "Float"
+      },
+      {
+        "name": "dosing_pump_capacity_ml_per_sec",
+        "ordinal": 9,
+        "type_info": "Float"
+      },
+      {
+        "name": "last_calibrated",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0c7ebd55ee4c1e4789bcaa18637522cebecafb785c074e4313bd3b1cc6c0d561"
+}

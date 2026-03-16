@@ -11,7 +11,6 @@ use std::{
 };
 use tracing::{debug, warn};
 
-// --- Cấu trúc dữ liệu lưu trữ trạng thái Rate Limit ---
 struct ClientData {
     count: u32,
     window_start: Instant,
@@ -19,14 +18,12 @@ struct ClientData {
 
 #[derive(Clone)]
 pub struct RateLimiter {
-    // Shared state: IP -> Data
     state: Arc<Mutex<HashMap<String, ClientData>>>,
     max_requests: u32,
     window_duration: Duration,
 }
 
 impl RateLimiter {
-    /// Khởi tạo: max_requests = 60, window_duration = 60 giây (1 phút)
     pub fn new(max_requests: u32, window_duration_secs: u64) -> Self {
         Self {
             state: Arc::new(Mutex::new(HashMap::new())),
@@ -36,7 +33,6 @@ impl RateLimiter {
     }
 }
 
-// --- Implement Transform trait ---
 impl<S, B> Transform<S, ServiceRequest> for RateLimiter
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
@@ -59,7 +55,6 @@ where
     }
 }
 
-// --- Implement Service trait (Logic chính) ---
 pub struct RateLimiterMiddleware<S> {
     service: S,
     state: Arc<Mutex<HashMap<String, ClientData>>>,
@@ -80,9 +75,6 @@ where
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        // 1. Lấy IP của client.
-        // Dùng connection_info() cực kỳ an toàn vì nó tự động bóc tách header X-Forwarded-For
-        // nếu server của bạn chạy sau Nginx/Cloudflare, hoặc lấy IP gốc nếu chạy trực tiếp.
         let client_ip = req
             .connection_info()
             .realip_remote_addr()
@@ -92,13 +84,9 @@ where
         let now = Instant::now();
         let mut is_allowed = true;
 
-        // 2. Lock Mutex để cập nhật map (phải giữ lock ngắn nhất có thể để tối ưu hiệu năng)
         {
             let mut state = self.state.lock().unwrap();
 
-            // Xóa các IP rác đã quá hạn (Cleanup) để chống tràn RAM (Memory Leak)
-            // Lưu ý: Trong production lớn, việc cleanup này nên chạy ở 1 background task riêng,
-            // nhưng với IoT hệ thống nhỏ, ta có thể cleanup trực tiếp khi map quá lớn (vd: > 10,000 IPs).
             if state.len() > 10_000 {
                 state
                     .retain(|_, data| now.duration_since(data.window_start) < self.window_duration);
@@ -109,13 +97,10 @@ where
                 window_start: now,
             });
 
-            // 3. Kiểm tra xem đã qua 1 phút (window_duration) chưa?
             if now.duration_since(client_data.window_start) >= self.window_duration {
-                // Đã sang phút mới -> Reset lại đếm và thời gian
                 client_data.count = 1;
                 client_data.window_start = now;
             } else {
-                // Vẫn trong 1 phút hiện tại
                 client_data.count += 1;
                 if client_data.count > self.max_requests {
                     is_allowed = false;
@@ -128,7 +113,6 @@ where
             );
         } // <--- Drop lock tại đây để các request khác không bị block
 
-        // 4. Quyết định: Chặn hay Cho qua
         if !is_allowed {
             warn!(
                 "DDoS/Spam trigger: IP {} vượt quá giới hạn {} req/phút tại {}",
@@ -137,7 +121,6 @@ where
                 req.path()
             );
 
-            // Trả về HTTP 429 Too Many Requests
             let err = ErrorTooManyRequests(serde_json::json!({
                 "error": "Too Many Requests",
                 "message": format!("Bạn đã vượt quá giới hạn {} requests / {} giây. Vui lòng chờ.", self.max_requests, self.window_duration.as_secs())
@@ -146,7 +129,6 @@ where
             return Box::pin(async move { Err(err) });
         }
 
-        // Cho phép đi tiếp
         let fut = self.service.call(req);
         Box::pin(async move {
             let res = fut.await?;

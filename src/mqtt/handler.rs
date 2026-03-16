@@ -8,15 +8,18 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::AppState; // Cấu trúc AppState sẽ được định nghĩa ở main.rs
 use crate::db::influx::write_sensor_data;
 use crate::models::sensor::SensorData;
+use crate::services::tuya::send_tuya_command;
 
 #[derive(Deserialize)]
 struct DeviceStatusPayload {
     online: bool,
 }
 
-/// Xử lý tất cả các message MQTT đẩy lên từ thiết bị
-/// LƯU Ý: Không bao giờ được dùng .unwrap() hay return Err() gây panic ở đây,
-/// vì nó sẽ làm sập (crash) toàn bộ vòng lặp sự kiện MQTT của hệ thống.
+#[derive(Deserialize)]
+struct FsmPayload {
+    pub current_state: String,
+}
+
 #[instrument(skip(app_state, publish))]
 pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
     let topic = publish.topic.clone();
@@ -39,6 +42,9 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
         "status" => {
             handle_device_status(device_id, &payload_bytes, app_state).await;
         }
+        "fsm" => {
+            handle_fsm_state(device_id, &payload_bytes, app_state).await;
+        }
         _ => {
             debug!("Nhận được topic không quản lý: {}", topic);
         }
@@ -46,7 +52,6 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
 }
 
 async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
-    // 1. Parse JSON payload
     let sensor_data: SensorData = match serde_json::from_slice(payload) {
         Ok(data) => data,
         Err(e) => {
@@ -63,7 +68,6 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         device_id, sensor_data.ph_value, sensor_data.ec_value
     );
 
-    // 2. Ghi dữ liệu vào InfluxDB
     if let Err(e) = write_sensor_data(
         &app_state.influx_client,
         &app_state.influx_bucket,
@@ -72,21 +76,17 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
     .await
     {
         error!("Lỗi lưu SensorData vào InfluxDB ({}): {:?}", device_id, e);
-        // Không return ở đây để vẫn có thể đẩy data lên WebSocket cho user xem real-time
     }
 
     // 3. (Optional) Gọi service Alert để check SafetyConfig và trigger cảnh báo
     // crate::services::alert::check_safety_rules(&sensor_data, &app_state).await;
 
-    // 4. Đẩy dữ liệu ra WebSocket (Frontend)
-    // Giả sử app_state.ws_sender là một tokio::sync::broadcast::Sender<String>
     let ws_msg = json!({
         "type": "sensor_update",
         "device_id": device_id,
         "data": sensor_data
     });
 
-    // Bỏ qua lỗi nếu không có client nào đang kết nối (channel empty)
     let _ = app_state.alert_sender.send(ws_msg.to_string());
 }
 
@@ -104,7 +104,6 @@ async fn handle_device_status(device_id: String, payload: &[u8], app_state: web:
         device_id, status.online
     );
 
-    // Đẩy thông báo trạng thái thiết bị ra WebSocket
     let ws_msg = json!({
         "type": "device_status",
         "device_id": device_id,
@@ -113,3 +112,55 @@ async fn handle_device_status(device_id: String, payload: &[u8], app_state: web:
 
     let _ = app_state.alert_sender.send(ws_msg.to_string());
 }
+
+async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
+    let fsm_data: FsmPayload = match serde_json::from_slice(payload) {
+        Ok(data) => data,
+        Err(e) => {
+            error!("Lỗi parse FsmPayload từ {}: {:?}", device_id, e);
+            return;
+        }
+    };
+
+    let new_state = fsm_data.current_state;
+    info!(
+        "ESP32 [{}] vừa chuyển sang trạng thái FSM: {}",
+        device_id, new_state
+    );
+
+    {
+        let mut states = app_state.device_states.write().await; // Lock Write
+        states.insert(device_id.clone(), new_state.clone());
+    }
+
+    if new_state != "Monitoring" {
+        warn!(
+            "🚨 Trạng thái '{}' không an toàn cho bơm Tuần Hoàn! Yêu cầu ngắt khẩn cấp...",
+            new_state
+        );
+
+        match send_tuya_command(false).await {
+            Ok(_) => {
+                info!(
+                    "✅ Đã ngắt bơm Tuya thành công để bảo vệ rễ cây khỏi nồng độ EC chưa ổn định!"
+                );
+            }
+            Err(e) => {
+                error!("❌ LỖI KHẨN CẤP: Không thể ngắt bơm Tuya: {:?}", e);
+            }
+        }
+    } else {
+        info!(
+            "Trạng thái '{}' an toàn. Chờ Scheduler quyết định lịch bơm.",
+            new_state
+        );
+    }
+
+    let ws_msg = json!({
+        "type": "fsm_update",
+        "device_id": device_id,
+        "current_state": new_state
+    });
+    let _ = app_state.alert_sender.send(ws_msg.to_string());
+}
+

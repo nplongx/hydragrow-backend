@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO sensor_calibration (\n            device_id, ph_v7, ph_v4, ec_factor, temp_offset, last_calibrated\n        ) VALUES (?, ?, ?, ?, ?, ?)\n        ON CONFLICT(device_id) DO UPDATE SET\n            ph_v7 = excluded.ph_v7, ph_v4 = excluded.ph_v4,\n            ec_factor = excluded.ec_factor, temp_offset = excluded.temp_offset,\n            last_calibrated = excluded.last_calibrated\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "fbcad703f84a725448d1b962d2abef37fc3c7dc892bd366f488e62bc2180e19e"
+}

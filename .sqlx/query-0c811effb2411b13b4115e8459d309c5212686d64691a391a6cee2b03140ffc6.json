@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT \n            device_id, ec_target, ec_tolerance, ph_min, ph_max, ph_tolerance,\n            temp_min, temp_max, control_mode, is_enabled,\n            last_updated as \"last_updated: _\" \n        FROM device_config \n        WHERE device_id = ?\n        ",
+  "query": "SELECT * FROM device_config WHERE device_id = ?",
   "describe": {
     "columns": [
       {
@@ -19,43 +19,38 @@
         "type_info": "Float"
       },
       {
-        "name": "ph_min",
+        "name": "ph_target",
         "ordinal": 3,
         "type_info": "Float"
       },
       {
-        "name": "ph_max",
+        "name": "ph_tolerance",
         "ordinal": 4,
         "type_info": "Float"
       },
       {
-        "name": "ph_tolerance",
+        "name": "temp_target",
         "ordinal": 5,
         "type_info": "Float"
       },
       {
-        "name": "temp_min",
+        "name": "temp_tolerance",
         "ordinal": 6,
         "type_info": "Float"
       },
       {
-        "name": "temp_max",
-        "ordinal": 7,
-        "type_info": "Float"
-      },
-      {
         "name": "control_mode",
-        "ordinal": 8,
+        "ordinal": 7,
         "type_info": "Text"
       },
       {
         "name": "is_enabled",
-        "ordinal": 9,
+        "ordinal": 8,
         "type_info": "Integer"
       },
       {
-        "name": "last_updated: _",
-        "ordinal": 10,
+        "name": "last_updated",
+        "ordinal": 9,
         "type_info": "Text"
       }
     ],
@@ -72,9 +67,8 @@
       false,
       false,
       false,
-      false,
       false
     ]
   },
-  "hash": "a4cc6834732020b680663c533a40b28bdf4863709a3f9383e8384239ccb81ec1"
+  "hash": "0c811effb2411b13b4115e8459d309c5212686d64691a391a6cee2b03140ffc6"
 }

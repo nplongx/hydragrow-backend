@@ -2,19 +2,15 @@ use anyhow::{Context, Result};
 use futures_util::stream;
 use influxdb2::Client;
 use influxdb2::models::DataPoint;
-use tracing::{error, instrument};
+use tracing::instrument;
 
-use crate::models::sensor::{PumpStatus, SensorData, SensorDataRow};
+use crate::models::sensor::{SensorData, SensorDataRow};
 
-/// Ghi dữ liệu cảm biến mới vào InfluxDB
 #[instrument(skip(client, data))]
 pub async fn write_sensor_data(client: &Client, bucket: &str, data: &SensorData) -> Result<()> {
-    // 1. Chuyển đổi struct PumpStatus thành chuỗi JSON
     let pump_status_json = serde_json::to_string(&data.pump_status)
         .context("Failed to serialize pump_status to JSON")?;
 
-    // 2. Build DataPoint
-    // Lưu ý: Nếu data.timestamp rỗng hoặc lỗi, InfluxDB sẽ tự lấy thời gian hiện tại lúc insert
     let point = DataPoint::builder("sensor_data")
         .tag("device_id", &data.device_id)
         .field("ec_value", data.ec_value)
@@ -25,7 +21,6 @@ pub async fn write_sensor_data(client: &Client, bucket: &str, data: &SensorData)
         .build()
         .context("Failed to build InfluxDB DataPoint")?;
 
-    // 3. Thực thi việc ghi
     client
         .write(bucket, stream::iter(vec![point]))
         .await
@@ -34,7 +29,6 @@ pub async fn write_sensor_data(client: &Client, bucket: &str, data: &SensorData)
     Ok(())
 }
 
-/// Lấy record mới nhất của một thiết bị (Rất cần cho Valve Guard)
 #[instrument(skip(client))]
 pub async fn get_latest_sensor_data(
     client: &Client,
@@ -44,11 +38,11 @@ pub async fn get_latest_sensor_data(
     let flux_query = format!(
         r#"
         from(bucket: "{}")
-            |> range(start: -1h) // Chỉ quét trong 1h gần nhất để tối ưu
-            |> filter(fn: (r) => r["_measurement"] == "sensor_data" and r["device_id"] == "{}")
-            |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-            |> sort(columns: ["_time"], desc: true)
-            |> limit(n: 1)
+        |> range(start: -24h)
+        |> filter(fn: (r) => r["_measurement"] == "sensor_data")
+        |> filter(fn: (r) => r.device_id == "{}")
+        |> sort(columns: ["_time"], desc: true)
+        |> limit(n: 1)
         "#,
         bucket, device_id
     );
@@ -59,7 +53,6 @@ pub async fn get_latest_sensor_data(
         .await
         .context("Flux query failed")?;
 
-    // Parse kết quả từ InfluxDB (Khá thủ công vì cấu trúc trả về của InfluxDB Rust Client)
     if let Some(table) = tables.first() {
         return Ok(table.to_owned().into());
     }

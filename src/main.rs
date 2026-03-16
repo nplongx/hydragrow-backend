@@ -5,10 +5,12 @@ use influxdb2::Client as InfluxClient;
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde::Serialize;
 use sqlx::sqlite::SqlitePoolOptions;
-use std::{env, sync::Arc, time::Duration};
-use tokio::sync::broadcast;
+use std::{collections::HashMap, env, sync::Arc, time::Duration};
+use tokio::sync::{RwLock, broadcast};
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
+
+use crate::services::scheduler::start_tuya_scheduler;
 
 // Khai báo các module trong dự án (tương ứng với cấu trúc thư mục)
 pub mod api;
@@ -34,6 +36,7 @@ pub struct AppState {
     pub mqtt_client: AsyncClient,
     pub api_key: String,
     pub alert_sender: broadcast::Sender<String>,
+    pub device_states: std::sync::Arc<RwLock<HashMap<String, String>>>,
 }
 
 #[tokio::main]
@@ -87,6 +90,7 @@ async fn main() -> anyhow::Result<()> {
     // 6. Khởi tạo Broadcast Channel cho WebSocket (Sức chứa 100 message)
     let (alert_sender, _) = broadcast::channel(100);
     let api_key = std::env::var("API_KEY").context("API_KEY must be set in .env")?;
+    let device_states = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
     // 7. Đóng gói tất cả vào AppState (dùng Arc để chia sẻ an toàn giữa các thread)
     let app_state = web::Data::new(AppState {
         sqlite_pool,
@@ -95,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
         mqtt_client: mqtt_client.clone(),
         alert_sender,
         api_key,
+        device_states,
     });
 
     // 8. Đăng ký nhận (Subscribe) các topic từ MQTT Broker
@@ -138,6 +143,8 @@ async fn main() -> anyhow::Result<()> {
         "🚀 API Server đang khởi chạy tại http://{}:{}",
         server_host, server_port
     );
+
+    start_tuya_scheduler(app_state.clone(), "DEVICE_1".to_string()).await;
 
     HttpServer::new(move || {
         let auth_middleware = api::middleware::auth::ApiKeyAuth::new(api_key.clone());

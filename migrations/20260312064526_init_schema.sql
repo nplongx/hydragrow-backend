@@ -37,22 +37,29 @@ CREATE TABLE pump_calibration (
     FOREIGN KEY (device_id) REFERENCES device_config(device_id)
 );
 
--- 4. CẤU HÌNH ĐỊNH LƯỢNG (Dosing)
+-- 4. CẤU HÌNH ĐỊNH LƯỢNG (Dosing) - ĐÃ CẬP NHẬT THEO ESP32
 CREATE TABLE dosing_calibration (
     device_id TEXT NOT NULL PRIMARY KEY,
     tank_volume_l REAL NOT NULL,
     ec_gain_per_ml REAL NOT NULL,
     ph_shift_up_per_ml REAL NOT NULL,
     ph_shift_down_per_ml REAL NOT NULL,
-    mixing_delay_sec INTEGER NOT NULL,
+    
+    -- [CẬP NHẬT] Thời gian khuấy và ổn định cảm biến
+    active_mixing_sec INTEGER NOT NULL,
+    sensor_stabilize_sec INTEGER NOT NULL,
+    
     ec_step_ratio REAL NOT NULL,
     ph_step_ratio REAL NOT NULL,
+    
+    -- [CẬP NHẬT] Công suất bơm dùng để tính toán thời gian bơm
+    dosing_pump_capacity_ml_per_sec REAL NOT NULL DEFAULT 0.5,
+    
     last_calibrated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (device_id) REFERENCES device_config(device_id)
 );
 
--- 5. CẤU HÌNH NƯỚC (Water Config - BẢNG MỚI)
--- Chuyên lo việc vận hành, tuần hoàn và các mốc nước mục tiêu
+-- 5. CẤU HÌNH NƯỚC (Water Config - ĐÃ THÊM CÁC TÍNH NĂNG MỚI)
 CREATE TABLE water_config (
     device_id TEXT NOT NULL PRIMARY KEY,
     water_level_min REAL NOT NULL,
@@ -62,12 +69,26 @@ CREATE TABLE water_config (
     circulation_mode TEXT NOT NULL,
     circulation_on_sec INTEGER NOT NULL,
     circulation_off_sec INTEGER NOT NULL,
+    
+    -- [MỚI] Các biến liên quan đến tự động điều tiết nước
+    water_level_tolerance REAL NOT NULL DEFAULT 1.0,
+    auto_refill_enabled INTEGER NOT NULL DEFAULT 1,
+    auto_drain_overflow INTEGER NOT NULL DEFAULT 1,
+    
+    -- [MỚI] Tính năng pha loãng (Dilution) khi EC quá cao
+    auto_dilute_enabled INTEGER NOT NULL DEFAULT 1,
+    dilute_drain_amount_cm REAL NOT NULL DEFAULT 2.0,
+    
+    -- [MỚI] Tính năng lịch thay nước (Schedule)
+    scheduled_water_change_enabled INTEGER NOT NULL DEFAULT 0,
+    water_change_interval_sec INTEGER NOT NULL DEFAULT 259200,
+    scheduled_drain_amount_cm REAL NOT NULL DEFAULT 5.0,
+
     last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (device_id) REFERENCES device_config(device_id)
 );
 
--- 6. CẤU HÌNH AN TOÀN (Safety Config - ĐÃ CẮT GỌT)
--- Chuyên lo việc ngắt khẩn cấp, giới hạn phần cứng, ngăn rủi ro
+-- 6. CẤU HÌNH AN TOÀN (Safety Config - Chuyên lo việc ngắt khẩn cấp, ngăn rủi ro)
 CREATE TABLE safety_config (
     device_id TEXT NOT NULL PRIMARY KEY,
 

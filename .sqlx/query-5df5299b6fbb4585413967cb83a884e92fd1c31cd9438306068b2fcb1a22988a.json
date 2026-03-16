@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO safety_config (\n            device_id, max_ec_limit, min_ec_limit, min_ph_limit, max_ph_limit, max_ec_delta, max_ph_delta,\n            max_dose_per_cycle, cooldown_sec, max_dose_per_hour, water_level_critical_min,\n            max_refill_cycles_per_hour, max_drain_cycles_per_hour, max_refill_duration_sec,\n            max_drain_duration_sec, max_temp_limit, min_temp_limit, emergency_shutdown, last_updated\n        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ON CONFLICT(device_id) DO UPDATE SET\n            max_ec_limit = excluded.max_ec_limit, min_ec_limit = excluded.min_ec_limit, min_ph_limit = excluded.min_ph_limit,\n            max_ph_limit = excluded.max_ph_limit, max_ec_delta = excluded.max_ec_delta, max_ph_delta = excluded.max_ph_delta,\n            max_dose_per_cycle = excluded.max_dose_per_cycle, cooldown_sec = excluded.cooldown_sec,\n            max_dose_per_hour = excluded.max_dose_per_hour, water_level_critical_min = excluded.water_level_critical_min,\n            max_refill_cycles_per_hour = excluded.max_refill_cycles_per_hour, max_drain_cycles_per_hour = excluded.max_drain_cycles_per_hour,\n            max_refill_duration_sec = excluded.max_refill_duration_sec, max_drain_duration_sec = excluded.max_drain_duration_sec,\n            max_temp_limit = excluded.max_temp_limit, min_temp_limit = excluded.min_temp_limit,\n            emergency_shutdown = excluded.emergency_shutdown, last_updated = excluded.last_updated\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 19
+    },
+    "nullable": []
+  },
+  "hash": "5df5299b6fbb4585413967cb83a884e92fd1c31cd9438306068b2fcb1a22988a"
+}

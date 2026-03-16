@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT * FROM sensor_calibration WHERE device_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "device_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "ph_v7",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "ph_v4",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "ec_factor",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "temp_offset",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "last_calibrated",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6e384ede4ffe22522088716e7e563677f66d87e6b3eedd122090e16f9c1b426e"
+}

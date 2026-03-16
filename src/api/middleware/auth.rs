@@ -13,7 +13,6 @@ pub struct ApiKeyAuth {
 }
 
 impl ApiKeyAuth {
-    /// Khởi tạo Middleware với API Key lấy từ biến môi trường lúc start server
     pub fn new(api_key: String) -> Self {
         Self { api_key }
     }
@@ -58,19 +57,46 @@ where
         let app_state = req.app_data::<actix_web::web::Data<AppState>>().unwrap();
         let expected_api_key = &app_state.api_key;
 
-        let provided_key = req
+        // 1. Thử lấy từ Header trước (Dành cho API bình thường)
+        let header_key = req
             .headers()
             .get("X-API-Key")
             .and_then(|hv| hv.to_str().ok());
 
-        if provided_key != Some(expected_api_key) {
+        // Cấu trúc phụ để bóc tách query string nhanh gọn
+        #[derive(serde::Deserialize)]
+        struct QueryAuth {
+            api_key: Option<String>,
+        }
+
+        let mut is_authorized = false;
+
+        // Kiểm tra Header trước
+        if let Some(key) = header_key {
+            if key == expected_api_key {
+                is_authorized = true;
+            }
+        }
+        // 2. Nếu Header không có, thử tìm trong Query String (Dành cho WebSocket)
+        else if let Ok(query) = actix_web::web::Query::<QueryAuth>::from_query(req.query_string())
+        {
+            if let Some(key) = &query.api_key {
+                if key == expected_api_key {
+                    is_authorized = true;
+                }
+            }
+        }
+
+        // Nếu cả 2 cách đều thất bại -> Trả về 401
+        if !is_authorized {
             let response = HttpResponse::Unauthorized()
-                .json(serde_json::json!({"error": "Unauthorized: Invalid or missing X-API-Key"}))
+                .json(serde_json::json!({"error": "Unauthorized: Invalid or missing API Key"}))
                 .map_into_right_body();
             let (http_req, _payload) = req.into_parts();
             return Box::pin(ready(Ok(ServiceResponse::new(http_req, response))));
         }
 
+        // Cho phép request đi tiếp tới ws_handler
         let srv = Rc::clone(&self.service);
         Box::pin(async move {
             let res = srv.call(req).await?;

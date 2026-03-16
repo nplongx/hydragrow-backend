@@ -1,0 +1,128 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT * FROM safety_config WHERE device_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "device_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "min_ec_limit",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_ec_limit",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "min_ph_limit",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_ph_limit",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_ec_delta",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_ph_delta",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_dose_per_cycle",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_dose_per_hour",
+        "ordinal": 8,
+        "type_info": "Float"
+      },
+      {
+        "name": "cooldown_sec",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "min_temp_limit",
+        "ordinal": 10,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_temp_limit",
+        "ordinal": 11,
+        "type_info": "Float"
+      },
+      {
+        "name": "water_level_critical_min",
+        "ordinal": 12,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_refill_cycles_per_hour",
+        "ordinal": 13,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_drain_cycles_per_hour",
+        "ordinal": 14,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_refill_duration_sec",
+        "ordinal": 15,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_drain_duration_sec",
+        "ordinal": 16,
+        "type_info": "Integer"
+      },
+      {
+        "name": "emergency_shutdown",
+        "ordinal": 17,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_updated",
+        "ordinal": 18,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "859cef20fd9060499f0711aa3222acd8d7e11e3c538bb5fd25e60e4ead6e139d"
+}

@@ -11,8 +11,6 @@ use sha2::{Digest, Sha256};
 use std::env;
 use tracing::{error, info};
 
-// Cấu hình URL mặc định (Tùy khu vực của bạn, ở VN thường dùng server China hoặc US)
-// Đổi thành "https://openapi.tuyaus.com" nếu bạn chọn server Mỹ
 const TUYA_BASE_URL: &str = "https://openapi.tuyacn.com";
 
 #[derive(Deserialize, Debug)]
@@ -27,14 +25,12 @@ struct TuyaTokenResult {
     access_token: String,
 }
 
-/// Lấy mã băm SHA256 của body
 fn get_body_hash(body: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(body.as_bytes());
     hex::encode(hasher.finalize()).to_lowercase()
 }
 
-/// Thuật toán tạo Signature chuẩn của Tuya
 fn generate_sign(
     client_id: &str,
     secret: &str,
@@ -45,7 +41,6 @@ fn generate_sign(
     body_str: &str,
 ) -> String {
     let body_hash = get_body_hash(body_str);
-    // Format: HTTPMethod \n Content-SHA256 \n Headers \n URL
     let string_to_sign = format!("{}\n{}\n\n{}", method, body_hash, url);
     let str_for_mac = format!(
         "{}{}{}{}",
@@ -58,12 +53,10 @@ fn generate_sign(
     hex::encode(mac.finalize().into_bytes()).to_uppercase()
 }
 
-/// Lấy Access Token từ Tuya Cloud
 async fn get_tuya_token(client: &Client, client_id: &str, secret: &str) -> Result<String> {
     let timestamp = Utc::now().timestamp_millis().to_string();
     let url_path = "/v1.0/token?grant_type=1";
 
-    // Khi lấy token, access_token = rỗng, body = rỗng
     let sign = generate_sign(client_id, secret, "", &timestamp, "GET", url_path, "");
 
     let mut headers = HeaderMap::new();
@@ -81,18 +74,16 @@ async fn get_tuya_token(client: &Client, client_id: &str, secret: &str) -> Resul
         .json()
         .await?;
 
-    if resp.success {
-        if let Some(res) = resp.result {
-            return Ok(res.access_token);
-        }
+    if resp.success
+        && let Some(res) = resp.result
+    {
+        return Ok(res.access_token);
     }
 
     Err(anyhow!("Lỗi lấy Token Tuya: {:?}", resp.msg))
 }
 
-/// Hàm chính: Gửi lệnh Bật/Tắt ổ cắm
 pub async fn send_tuya_command(turn_on: bool) -> Result<()> {
-    // 1. Lấy thông tin từ biến môi trường (.env)
     let client_id = env::var("TUYA_CLIENT_ID").unwrap_or_default();
     let secret = env::var("TUYA_SECRET").unwrap_or_default();
     let device_id = env::var("TUYA_DEVICE_ID").unwrap_or_default();
@@ -105,10 +96,8 @@ pub async fn send_tuya_command(turn_on: bool) -> Result<()> {
 
     let client = Client::new();
 
-    // 2. Lấy Access Token
     let access_token = get_tuya_token(&client, &client_id, &secret).await?;
 
-    // 3. Chuẩn bị payload lệnh
     let url_path = format!("/v1.0/iot-03/devices/{}/commands", device_id);
     let payload = json!({
         "commands": [
@@ -120,7 +109,6 @@ pub async fn send_tuya_command(turn_on: bool) -> Result<()> {
     });
     let body_str = serde_json::to_string(&payload)?;
 
-    // 4. Tạo chữ ký (Signature) cho request POST
     let timestamp = Utc::now().timestamp_millis().to_string();
     let sign = generate_sign(
         &client_id,
@@ -132,7 +120,6 @@ pub async fn send_tuya_command(turn_on: bool) -> Result<()> {
         &body_str,
     );
 
-    // 5. Gắn Headers
     let mut headers = HeaderMap::new();
     headers.insert("client_id", HeaderValue::from_str(&client_id)?);
     headers.insert("access_token", HeaderValue::from_str(&access_token)?);
@@ -143,7 +130,6 @@ pub async fn send_tuya_command(turn_on: bool) -> Result<()> {
 
     let url = format!("{}{}", TUYA_BASE_URL, url_path);
 
-    // 6. Gửi lệnh
     let resp = client
         .post(&url)
         .headers(headers)
@@ -152,7 +138,6 @@ pub async fn send_tuya_command(turn_on: bool) -> Result<()> {
         .await?;
     let resp_text = resp.text().await?;
 
-    // Kiểm tra xem Tuya phản hồi true hay false
     if resp_text.contains("\"success\":true") {
         Ok(())
     } else {

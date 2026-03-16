@@ -44,8 +44,6 @@ pub async fn get_latest(path: web::Path<String>, app_state: web::Data<AppState>)
     }
 }
 
-/// GET /api/devices/{device_id}/sensors/history
-/// Lấy dữ liệu lịch sử để vẽ biểu đồ trên Frontend
 #[instrument(skip(app_state))]
 pub async fn get_history(
     path: web::Path<String>,
@@ -53,25 +51,35 @@ pub async fn get_history(
     app_state: web::Data<AppState>,
 ) -> impl Responder {
     let device_id = path.into_inner();
-    // Mặc định lấy 24h qua nếu user không truyền param
     let range = query.range.clone().unwrap_or_else(|| "24h".to_string());
 
-    // CHÚ Ý TỐI ƯU (Downsampling):
-    // Thiết bị gửi 1s/lần -> 1 ngày có 86,400 điểm. Nếu trả hết về Frontend, trình duyệt sẽ bị treo (crash).
-    // Ta dùng aggregateWindow(every: 5m, fn: mean) để tính trung bình mỗi 5 phút thành 1 điểm.
+    // [DEBUG 1] Ghi log thông số đầu vào
+    tracing::info!(
+        "Bắt đầu lấy lịch sử cho thiết bị: {}, range: {}",
+        device_id,
+        range
+    );
+
+    // LƯU Ý 1: Đã thêm dấu trừ (-) trước {} ở hàm range để lấy quá khứ (VD: -24h)
+    // LƯU Ý 2: Bạn nên kiểm tra lại dòng `limit(n: 1)`. Nếu đây là API biểu đồ thì nên bỏ dòng đó đi,
+    // hoặc dùng `aggregateWindow` nếu data quá lớn.
     let flux_query = format!(
         r#"
         from(bucket: "{}")
-            |> range(start: -{})
-            |> filter(fn: (r) => r["_measurement"] == "sensor_data" and r["device_id"] == "{}")
-            |> filter(fn: (r) => r["_field"] == "ec_value" or r["_field"] == "ph_value" or r["_field"] == "temp_value" or r["_field"] == "water_level")
-            |> aggregateWindow(every: 5m, fn: mean, createEmpty: false)
-            |> yield(name: "mean")
+        |> range(start: -{}) 
+        |> filter(fn: (r) => r["_measurement"] == "sensor_data")
+        |> filter(fn: (r) => r.device_id == "{}")
+        |> sort(columns: ["_time"], desc: true)
+        |> limit(n: 100)     
         "#,
         app_state.influx_bucket, range, device_id
     );
 
-    let query_obj = influxdb2::models::Query::new(flux_query);
+    // [DEBUG 2] In ra nguyên văn câu lệnh Flux.
+    // Mẹo: Bạn có thể copy câu này paste thẳng vào Data Explorer của InfluxDB UI để test chạy thử.
+    tracing::info!("Câu lệnh Flux Query được tạo ra:\n{}", flux_query);
+
+    let query_obj = influxdb2::models::Query::new(flux_query.clone());
 
     match app_state
         .influx_client
@@ -79,19 +87,27 @@ pub async fn get_history(
         .await
     {
         Ok(tables) => {
-            // Trả raw data từ InfluxDB về.
-            // Ở Frontend, bạn sẽ lặp qua mảng này để map vào thư viện vẽ Chart (như Recharts, Chart.js).
-            HttpResponse::Ok().json(json!({
+            // [DEBUG 3] In ra số lượng bản ghi trả về
+            tracing::info!("Query thành công! Trả về {} bản ghi.", tables.len());
+
+            // [DEBUG 4] In ra dữ liệu thô (nếu data quá nhiều, bạn có thể cân nhắc comment dòng này lại sau khi fix xong)
+            tracing::debug!("Dữ liệu thô từ InfluxDB: {:#?}", tables);
+
+            HttpResponse::Ok().json(serde_json::json!({
                 "status": "success",
                 "data": tables
             }))
         }
         Err(e) => {
-            error!(
+            // [DEBUG 5] Ghi log lỗi kèm theo câu lệnh gây lỗi để dễ debug
+            tracing::error!(
                 "Lỗi khi query biểu đồ từ InfluxDB cho {}: {:?}",
-                device_id, e
+                device_id,
+                e
             );
-            HttpResponse::InternalServerError().json(json!({
+            tracing::error!("Câu lệnh Flux gây lỗi:\n{}", flux_query);
+
+            HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": "Database Error",
                 "message": "Không thể truy xuất dữ liệu lịch sử"
             }))
@@ -99,7 +115,6 @@ pub async fn get_history(
     }
 }
 
-// Hàm khởi tạo để nhúng vào main.rs
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/api/devices/{device_id}/sensors")
