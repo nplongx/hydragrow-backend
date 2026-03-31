@@ -55,20 +55,20 @@ pub async fn control_pump(
 
     if req_data.pump == "CIRCULATION" {
         let is_on = req_data.action == "on";
-        match tuya::send_tuya_command(is_on).await {
-            Ok(_) => {
-                info!(
-                    "Đã {} bơm tuần hoàn qua Tuya API cho thiết bị {}",
-                    if is_on { "BẬT" } else { "TẮT" },
-                    device_id
-                );
-                return HttpResponse::Ok().json(json!({"status": "success"}));
-            }
-            Err(e) => {
-                error!("Lỗi Tuya API: {:?}", e);
-                return HttpResponse::InternalServerError().json(json!({"error": e.to_string()}));
-            }
-        }
+        // match tuya::send_tuya_command(is_on).await {
+        //     Ok(_) => {
+        //         info!(
+        //             "Đã {} bơm tuần hoàn qua Tuya API cho thiết bị {}",
+        //             if is_on { "BẬT" } else { "TẮT" },
+        //             device_id
+        //         );
+        //         return HttpResponse::Ok().json(json!({"status": "success"}));
+        //     }
+        //     Err(e) => {
+        //         error!("Lỗi Tuya API: {:?}", e);
+        //         return HttpResponse::InternalServerError().json(json!({"error": e.to_string()}));
+        //     }
+        // }
     }
 
     let mqtt_action = if req_data.action == "on" {

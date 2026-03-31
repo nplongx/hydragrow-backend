@@ -1,6 +1,6 @@
 use actix_web::web;
 use rumqttc::Publish;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tracing::{debug, error, info, instrument, warn};
@@ -9,6 +9,18 @@ use crate::AppState; // Cấu trúc AppState sẽ được định nghĩa ở ma
 use crate::db::influx::write_sensor_data;
 use crate::models::sensor::SensorData;
 use crate::services::tuya::send_tuya_command;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DosingReportPayload {
+    pub start_ec: f32,
+    pub start_ph: f32,
+    pub pump_a_ml: f32,
+    pub pump_b_ml: f32,
+    pub ph_up_ml: f32,
+    pub ph_down_ml: f32,
+    pub target_ec: f32,
+    pub target_ph: f32,
+}
 
 #[derive(Deserialize)]
 struct DeviceStatusPayload {
@@ -25,9 +37,9 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
     let topic = publish.topic.clone();
     let payload_bytes = publish.payload;
 
-    // Phân tích topic: hydro/{device_id}/{action}
+    // Phân tích topic: AGITECH/{device_id}/{action}
     let parts: Vec<&str> = topic.split('/').collect();
-    if parts.len() != 3 || parts[0] != "hydro" {
+    if parts.len() != 3 || parts[0] != "AGITECH" {
         warn!("Bỏ qua topic không đúng chuẩn hệ thống: {}", topic);
         return;
     }
@@ -44,6 +56,9 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
         }
         "fsm" => {
             handle_fsm_state(device_id, &payload_bytes, app_state).await;
+        }
+        "dosing_report" => {
+            handle_dosing_report(device_id, &payload_bytes, app_state).await;
         }
         _ => {
             debug!("Nhận được topic không quản lý: {}", topic);
@@ -133,28 +148,28 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
         states.insert(device_id.clone(), new_state.clone());
     }
 
-    if new_state != "Monitoring" {
-        warn!(
-            "🚨 Trạng thái '{}' không an toàn cho bơm Tuần Hoàn! Yêu cầu ngắt khẩn cấp...",
-            new_state
-        );
-
-        match send_tuya_command(false).await {
-            Ok(_) => {
-                info!(
-                    "✅ Đã ngắt bơm Tuya thành công để bảo vệ rễ cây khỏi nồng độ EC chưa ổn định!"
-                );
-            }
-            Err(e) => {
-                error!("❌ LỖI KHẨN CẤP: Không thể ngắt bơm Tuya: {:?}", e);
-            }
-        }
-    } else {
-        info!(
-            "Trạng thái '{}' an toàn. Chờ Scheduler quyết định lịch bơm.",
-            new_state
-        );
-    }
+    // if new_state != "Monitoring" {
+    //     warn!(
+    //         "🚨 Trạng thái '{}' không an toàn cho bơm Tuần Hoàn! Yêu cầu ngắt khẩn cấp...",
+    //         new_state
+    //     );
+    //
+    //     match send_tuya_command(false).await {
+    //         Ok(_) => {
+    //             info!(
+    //                 "✅ Đã ngắt bơm Tuya thành công để bảo vệ rễ cây khỏi nồng độ EC chưa ổn định!"
+    //             );
+    //         }
+    //         Err(e) => {
+    //             error!("❌ LỖI KHẨN CẤP: Không thể ngắt bơm Tuya: {:?}", e);
+    //         }
+    //     }
+    // } else {
+    //     info!(
+    //         "Trạng thái '{}' an toàn. Chờ Scheduler quyết định lịch bơm.",
+    //         new_state
+    //     );
+    // }
 
     let ws_msg = json!({
         "type": "fsm_update",
@@ -164,3 +179,56 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
     let _ = app_state.alert_sender.send(ws_msg.to_string());
 }
 
+async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
+    // 1. Parse dữ liệu ESP32 gửi lên
+    let report: DosingReportPayload = match serde_json::from_slice(payload) {
+        Ok(data) => data,
+        Err(e) => {
+            error!("Lỗi parse DosingReport từ {}: {:?}", device_id, e);
+            return;
+        }
+    };
+
+    info!(
+        "🌿 [{}] Báo cáo châm phân: A: {}ml, B: {}ml. Đang ghi lên Blockchain...",
+        device_id, report.pump_a_ml, report.pump_b_ml
+    );
+
+    // 2. Tạo Payload hoàn chỉnh để ghi lên Blockchain (Thêm timestamp từ Server cho chuẩn xác)
+    let blockchain_payload = json!({
+        "device_id": device_id,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "dosing_data": report
+    });
+
+    let payload_str = blockchain_payload.to_string();
+
+    // 3. GỌI HÀM SOLANA TẠI ĐÂY
+    match app_state
+        .solana_traceability
+        .record_dosing_history(&payload_str)
+        .await
+    {
+        Ok(tx_id) => {
+            info!("✅ Đã ghi lên Solana thành công! TxID: {}", tx_id);
+            info!(
+                "🔍 Kiểm tra tại: https://solscan.io/tx/{}?cluster=devnet",
+                tx_id
+            );
+
+            // Tùy chọn: Gửi TxID về Frontend qua WebSocket để hiện thông báo Xanh lá cây "Đã xác thực"
+            let ws_msg = json!({
+                "type": "blockchain_verified",
+                "device_id": device_id,
+                "tx_id": tx_id,
+                "explorer_url": format!("https://solscan.io/tx/{}?cluster=devnet", tx_id)
+            });
+            let _ = app_state.alert_sender.send(ws_msg.to_string());
+
+            // Tùy chọn 2: Bạn có thể INSERT thêm `tx_id` vào CSDL SQLite ở đây để lưu lịch sử
+        }
+        Err(e) => {
+            error!("❌ Lỗi ghi Blockchain cho {}: {:?}", device_id, e);
+        }
+    }
+}

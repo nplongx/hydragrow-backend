@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::value::BoolDeserializer};
 use sqlx::FromRow;
+
+use crate::db;
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct DeviceConfig {
@@ -19,11 +21,48 @@ pub struct DeviceConfig {
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct SensorCalibration {
     pub device_id: String,
+
+    // --- HIỆU CHUẨN ---
     pub ph_v7: f64,
     pub ph_v4: f64,
     pub ec_factor: f64,
+    pub ec_offset: f64, // Thêm mới từ DB
     pub temp_offset: f64,
+    pub temp_compensation_beta: f64, // Thêm mới từ DB
+
+    // --- LỌC NHIỄU & TẦN SUẤT ---
+    pub sampling_interval: i64, // Đổi sang i64 cho chuẩn SQLite INTEGER
+    pub publish_interval: i64,  // Thêm mới từ DB
+    pub moving_average_window: i64, // Thêm mới từ DB
+
+    // --- TRẠNG THÁI (SQLite lưu là INTEGER 0 hoặc 1) ---
+    pub is_ph_enabled: i64,   // Thêm mới từ DB
+    pub is_ec_enabled: i64,   // Thêm mới từ DB
+    pub is_temp_enabled: i64, // Thêm mới từ DB
+    pub is_water_level_enabled: i64,
+
     pub last_calibrated: String,
+}
+
+impl From<SensorCalibration> for SensorNodeConfig {
+    fn from(db_row: SensorCalibration) -> Self {
+        Self {
+            device_id: db_row.device_id,
+            ph_v7: db_row.ph_v7 as f32,
+            ph_v4: db_row.ph_v4 as f32,
+            ec_factor: db_row.ec_factor as f32,
+            ec_offset: db_row.ec_offset as f32,
+            temp_offset: db_row.temp_offset as f32,
+            temp_compensation_beta: db_row.temp_compensation_beta as f32,
+            sampling_interval: db_row.sampling_interval as u32,
+            publish_interval: db_row.publish_interval as u32,
+            moving_average_window: db_row.moving_average_window as u8,
+            is_ph_enabled: db_row.is_ph_enabled != 0, // Chuyển i64 thành bool
+            is_ec_enabled: db_row.is_ec_enabled != 0,
+            is_temp_enabled: db_row.is_temp_enabled != 0,
+            is_water_level_enabled: db_row.is_water_level_enabled != 0, // Nếu bảng chưa có thì mặc định là true
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -182,7 +221,7 @@ impl Default for WaterConfig {
 /// Đây là struct dùng để tạo JSON đẩy qua MQTT.
 /// Các trường (fields) bắt buộc phải khớp 100% với struct DeviceConfig trên ESP32
 #[derive(Debug, Serialize)]
-pub struct Esp32AggregatedConfig {
+pub struct ControllerNodeConfig {
     pub device_id: String,
     pub control_mode: String,
     pub is_enabled: bool,
@@ -211,6 +250,7 @@ pub struct Esp32AggregatedConfig {
     // --- 3. SAFETY CONFIG ---
     pub emergency_shutdown: bool,
     pub max_ec_limit: f64,
+    pub min_ec_limit: f64,
     pub min_ph_limit: f64,
     pub max_ph_limit: f64,
     pub max_ec_delta: f64,
@@ -236,3 +276,48 @@ pub struct Esp32AggregatedConfig {
     pub dosing_pump_capacity_ml_per_sec: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SensorNodeConfig {
+    pub device_id: String, // (Thêm mới) Định danh gói tin
+
+    // --- HIỆU CHUẨN CẢM BIẾN (CALIBRATION) ---
+    pub ph_v7: f32,                  // Điện áp đo được ở pH 7.0
+    pub ph_v4: f32,                  // Điện áp đo được ở pH 4.0
+    pub ec_factor: f32,              // Hệ số quy đổi EC (mặc định 880.0)
+    pub ec_offset: f32,              // (Thêm mới) Điểm bù 0 cho EC
+    pub temp_offset: f32,            // Hệ số bù trừ sai số nhiệt độ
+    pub temp_compensation_beta: f32, // (Thêm mới) Bù trừ EC theo nhiệt độ (VD: 0.02)
+
+    // --- CẤU HÌNH ĐỌC & LỌC NHIỄU (SAMPLING & FILTERING) ---
+    pub sampling_interval: u32,    // Thời gian lấy mẫu (ms) - VD: 1000
+    pub publish_interval: u32,     // (Thêm mới) Thời gian gửi MQTT (ms) - VD: 5000
+    pub moving_average_window: u8, // (Thêm mới) lọc nhiễu - VD: Lấy trung bình 10 mẫu
+
+    // --- TRẠNG THÁI CẢM BIẾN (HARDWARE FLAGS) ---
+    pub is_ph_enabled: bool,          // (Thêm mới) Bật/tắt đọc pH
+    pub is_ec_enabled: bool,          // (Thêm mới) Bật/tắt đọc EC
+    pub is_temp_enabled: bool,        // (Thêm mới) Bật/tắt đọc Nhiệt độ
+    pub is_water_level_enabled: bool, // (Thêm mới) Bật/tắt đọc mực nước
+}
+
+// Implement Default giúp bạn dễ dàng khởi tạo từ Database nếu thiếu trường
+impl Default for SensorNodeConfig {
+    fn default() -> Self {
+        Self {
+            device_id: String::new(),
+            ph_v7: 2.5,
+            ph_v4: 3.0,
+            ec_factor: 880.0,
+            ec_offset: 0.0,
+            temp_offset: 0.0,
+            temp_compensation_beta: 0.02,
+            sampling_interval: 1000,
+            publish_interval: 5000,
+            moving_average_window: 10,
+            is_ph_enabled: true,
+            is_ec_enabled: true,
+            is_temp_enabled: true,
+            is_water_level_enabled: true,
+        }
+    }
+}

@@ -1,8 +1,12 @@
 use anyhow::{Context, Result};
-use sqlx::SqlitePool;
+use chrono::Utc;
+use sqlx::{Error, SqlitePool};
 use tracing::instrument;
 
-use crate::models::config::{DeviceConfig, SafetyConfig};
+use crate::models::{
+    blockchain::BlockchainHistoryRow,
+    config::{DeviceConfig, SafetyConfig},
+};
 
 /// --- DEVICE CONFIG ---
 
@@ -166,4 +170,52 @@ pub async fn upsert_safety_config(pool: &SqlitePool, config: &SafetyConfig) -> R
     .await?;
 
     Ok(())
+}
+
+// 1. Hàm lưu TxID mới vào CSDL (Gọi ngay sau khi bắn lên Solana thành công)
+pub async fn insert_blockchain_tx(
+    pool: &SqlitePool,
+    device_id: &str,
+    action: &str,
+    tx_id: &str,
+) -> Result<(), Error> {
+    let explorer_url = format!("https://solscan.io/tx/{}?cluster=devnet", tx_id);
+    let now = Utc::now().to_rfc3339();
+
+    sqlx::query!(
+        r#"
+        INSERT INTO blockchain_history (device_id, action, tx_id, explorer_url)
+        VALUES (?, ?, ?, ?)
+        "#,
+        device_id,
+        action,
+        tx_id,
+        explorer_url
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+// 2. Hàm lấy lịch sử của thiết bị để đổ ra API Frontend
+pub async fn get_device_blockchain_history(
+    pool: &SqlitePool,
+    device_id: &str,
+) -> Result<Vec<BlockchainHistoryRow>, Error> {
+    let history = sqlx::query_as!(
+        BlockchainHistoryRow,
+        r#"
+        SELECT id, device_id, action, tx_id, explorer_url, created_at
+        FROM blockchain_history
+        WHERE device_id = ?
+        ORDER BY created_at DESC
+        LIMIT 50
+        "#,
+        device_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(history)
 }

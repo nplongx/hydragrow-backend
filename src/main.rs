@@ -5,12 +5,12 @@ use influxdb2::Client as InfluxClient;
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde::Serialize;
 use sqlx::sqlite::SqlitePoolOptions;
-use std::{collections::HashMap, env, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, fs, sync::Arc, time::Duration};
 use tokio::sync::{RwLock, broadcast};
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
-use crate::services::scheduler::start_tuya_scheduler;
+use crate::services::{scheduler::start_tuya_scheduler, solana::SolanaTraceability};
 
 // Khai báo các module trong dự án (tương ứng với cấu trúc thư mục)
 pub mod api;
@@ -37,6 +37,7 @@ pub struct AppState {
     pub api_key: String,
     pub alert_sender: broadcast::Sender<String>,
     pub device_states: std::sync::Arc<RwLock<HashMap<String, String>>>,
+    pub solana_traceability: SolanaTraceability,
 }
 
 #[tokio::main]
@@ -47,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 2. Khởi tạo hệ thống Log (Tracing) cực kỳ mạnh mẽ
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+        .with_max_level(Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("Lỗi khởi tạo tracing");
     info!("Bắt đầu khởi động hệ thống IoT Hydroponics...");
@@ -59,9 +60,6 @@ async fn main() -> anyhow::Result<()> {
         .connect(&database_url)
         .await?;
     info!("Đã kết nối thành công tới SQLite");
-
-    // chạy file .sql tạo bảng nếu DB chưa có.
-    sqlx::migrate!().run(&sqlite_pool).await?;
 
     // 4. Khởi tạo kết nối InfluxDB
     let influx_url = env::var("INFLUX_URL").expect("Thiếu biến INFLUX_URL");
@@ -88,6 +86,12 @@ async fn main() -> anyhow::Result<()> {
     info!("Đã khởi tạo MQTT Client");
 
     // 6. Khởi tạo Broadcast Channel cho WebSocket (Sức chứa 100 message)
+    let wallet_data =
+        fs::read_to_string("server_wallet.json").expect("Không tìm thấy file server_wallet.json");
+    let private_key: Vec<u8> = serde_json::from_str(&wallet_data).unwrap();
+
+    // Khởi tạo dịch vụ Solana trỏ tới DEVNET
+    let solana_service = SolanaTraceability::new("https://api.devnet.solana.com", &private_key);
     let (alert_sender, _) = broadcast::channel(100);
     let api_key = std::env::var("API_KEY").context("API_KEY must be set in .env")?;
     let device_states = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
@@ -100,14 +104,21 @@ async fn main() -> anyhow::Result<()> {
         alert_sender,
         api_key,
         device_states,
+        solana_traceability: solana_service,
     });
 
     // 8. Đăng ký nhận (Subscribe) các topic từ MQTT Broker
     mqtt_client
-        .subscribe("hydro/+/sensors", QoS::AtMostOnce)
+        .subscribe("AGITECH/+/sensors", QoS::AtMostOnce)
         .await?;
     mqtt_client
-        .subscribe("hydro/+/status", QoS::AtLeastOnce)
+        .subscribe("AGITECH/+/status", QoS::AtLeastOnce)
+        .await?;
+    mqtt_client
+        .subscribe("AGITECH/+/fsm", QoS::AtLeastOnce)
+        .await?;
+    mqtt_client
+        .subscribe("AGITECH/+/dosing_report", QoS::AtLeastOnce)
         .await?;
 
     // 9. Chạy vòng lặp lắng nghe MQTT trong một background task (Bắt buộc dùng tokio::spawn)
@@ -158,6 +169,7 @@ async fn main() -> anyhow::Result<()> {
             .configure(api::sensor::init_routes)
             .configure(api::ws::init_routes)
             .configure(api::config::init_routes)
+            .configure(api::solana::init_routes)
     })
     .bind((server_host, server_port))?
     .run()

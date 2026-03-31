@@ -14,13 +14,29 @@ CREATE TABLE device_config (
     last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. HIỆU CHUẨN CẢM BIẾN
+-- 2. CẤU HÌNH & HIỆU CHUẨN SENSOR NODE (Đã cập nhật)
 CREATE TABLE sensor_calibration (
     device_id TEXT NOT NULL PRIMARY KEY,
+    
+    -- [MỚI] HIỆU CHUẨN CẢM BIẾN
     ph_v7 REAL NOT NULL,
     ph_v4 REAL NOT NULL,
     ec_factor REAL NOT NULL,
+    ec_offset REAL NOT NULL DEFAULT 0.0,
     temp_offset REAL NOT NULL,
+    temp_compensation_beta REAL NOT NULL DEFAULT 0.02,
+    
+    -- [MỚI] CẤU HÌNH ĐỌC & LỌC NHIỄU (SAMPLING & FILTERING)
+    sampling_interval INTEGER NOT NULL DEFAULT 1000,
+    publish_interval INTEGER NOT NULL DEFAULT 5000,
+    moving_average_window INTEGER NOT NULL DEFAULT 10,
+    
+    -- [MỚI] TRẠNG THÁI CẢM BIẾN (HARDWARE FLAGS) - Dùng INTEGER (0, 1) thay cho boolean
+    is_ph_enabled INTEGER NOT NULL DEFAULT 1,
+    is_ec_enabled INTEGER NOT NULL DEFAULT 1,
+    is_temp_enabled INTEGER NOT NULL DEFAULT 1,
+    is_water_level_enabled INTEGER NOT NULL DEFAULT 1,
+    
     last_calibrated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (device_id) REFERENCES device_config(device_id)
 );
@@ -45,21 +61,21 @@ CREATE TABLE dosing_calibration (
     ph_shift_up_per_ml REAL NOT NULL,
     ph_shift_down_per_ml REAL NOT NULL,
     
-    -- [CẬP NHẬT] Thời gian khuấy và ổn định cảm biến
+    -- Thời gian khuấy và ổn định cảm biến
     active_mixing_sec INTEGER NOT NULL,
     sensor_stabilize_sec INTEGER NOT NULL,
     
     ec_step_ratio REAL NOT NULL,
     ph_step_ratio REAL NOT NULL,
     
-    -- [CẬP NHẬT] Công suất bơm dùng để tính toán thời gian bơm
+    -- Công suất bơm dùng để tính toán thời gian bơm
     dosing_pump_capacity_ml_per_sec REAL NOT NULL DEFAULT 0.5,
     
     last_calibrated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (device_id) REFERENCES device_config(device_id)
 );
 
--- 5. CẤU HÌNH NƯỚC (Water Config - ĐÃ THÊM CÁC TÍNH NĂNG MỚI)
+-- 5. CẤU HÌNH NƯỚC (Water Config)
 CREATE TABLE water_config (
     device_id TEXT NOT NULL PRIMARY KEY,
     water_level_min REAL NOT NULL,
@@ -70,16 +86,16 @@ CREATE TABLE water_config (
     circulation_on_sec INTEGER NOT NULL,
     circulation_off_sec INTEGER NOT NULL,
     
-    -- [MỚI] Các biến liên quan đến tự động điều tiết nước
+    -- Các biến liên quan đến tự động điều tiết nước
     water_level_tolerance REAL NOT NULL DEFAULT 1.0,
     auto_refill_enabled INTEGER NOT NULL DEFAULT 1,
     auto_drain_overflow INTEGER NOT NULL DEFAULT 1,
     
-    -- [MỚI] Tính năng pha loãng (Dilution) khi EC quá cao
+    -- Tính năng pha loãng (Dilution) khi EC quá cao
     auto_dilute_enabled INTEGER NOT NULL DEFAULT 1,
     dilute_drain_amount_cm REAL NOT NULL DEFAULT 2.0,
     
-    -- [MỚI] Tính năng lịch thay nước (Schedule)
+    -- Tính năng lịch thay nước (Schedule)
     scheduled_water_change_enabled INTEGER NOT NULL DEFAULT 0,
     water_change_interval_sec INTEGER NOT NULL DEFAULT 259200,
     scheduled_drain_amount_cm REAL NOT NULL DEFAULT 5.0,
@@ -119,6 +135,18 @@ CREATE TABLE safety_config (
     last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (device_id) REFERENCES device_config(device_id)
 );
+
+CREATE TABLE blockchain_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    device_id TEXT NOT NULL,
+    action TEXT NOT NULL,        -- VD: 'dosing_report', 'manual_pump_override'
+    tx_id TEXT NOT NULL UNIQUE,  -- Mã giao dịch trên Solana (Không được trùng)
+    explorer_url TEXT NOT NULL,  -- Link xem trên Solscan
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (device_id) REFERENCES device_config(device_id)
+);
+
+CREATE INDEX idx_blockchain_device ON blockchain_history(device_id);
 
 -- Indexes for faster queries
 CREATE INDEX idx_pump_device ON pump_calibration(device_id);

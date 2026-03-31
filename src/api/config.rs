@@ -1,3 +1,5 @@
+use std::fmt::format;
+
 use actix_web::{HttpResponse, Responder, web};
 use chrono::Utc;
 use rumqttc::QoS;
@@ -6,19 +8,19 @@ use tracing::{error, info, instrument};
 
 use crate::AppState;
 use crate::models::config::{
-    DeviceConfig, DosingCalibration, Esp32AggregatedConfig, SafetyConfig, SensorCalibration,
-    WaterConfig,
+    ControllerNodeConfig, DeviceConfig, DosingCalibration, SafetyConfig, SensorCalibration,
+    SensorNodeConfig, WaterConfig,
 };
 
 // ==========================================
 // HELPER FUNCTIONS
 // ==========================================
 
-/// Hàm dùng chung để gom toàn bộ dữ liệu Config từ Database
-async fn fetch_aggregated_config(
+/// Hàm gom dữ liệu Config từ Database để tạo payload cho CONTROLLER NODE
+async fn fetch_controller_node_config(
     pool: &sqlx::SqlitePool,
     device_id: &str,
-) -> Result<Esp32AggregatedConfig, String> {
+) -> Result<ControllerNodeConfig, String> {
     // 1. Lấy Base Config (Bắt buộc phải có)
     let base = sqlx::query_as!(
         DeviceConfig,
@@ -75,8 +77,8 @@ async fn fetch_aggregated_config(
         ..Default::default()
     });
 
-    // Mapping sang Esp32AggregatedConfig (ĐÃ CẬP NHẬT TRƯỜNG MỚI)
-    Ok(Esp32AggregatedConfig {
+    // Mapping sang ControllerNodeConfig
+    Ok(ControllerNodeConfig {
         device_id: device_id.to_string(),
         control_mode: base.control_mode.to_lowercase(),
         is_enabled: base.is_enabled == 1,
@@ -100,6 +102,7 @@ async fn fetch_aggregated_config(
 
         emergency_shutdown: s_cfg.emergency_shutdown == 1,
         max_ec_limit: s_cfg.max_ec_limit,
+        min_ec_limit: s_cfg.min_ec_limit,
         min_ph_limit: s_cfg.min_ph_limit,
         max_ph_limit: s_cfg.max_ph_limit,
         max_ec_delta: s_cfg.max_ec_delta,
@@ -113,7 +116,6 @@ async fn fetch_aggregated_config(
         ph_shift_up_per_ml: d_cfg.ph_shift_up_per_ml,
         ph_shift_down_per_ml: d_cfg.ph_shift_down_per_ml,
 
-        // --- CẬP NHẬT MỚI Ở ĐÂY ---
         active_mixing_sec: d_cfg.active_mixing_sec,
         sensor_stabilize_sec: d_cfg.sensor_stabilize_sec,
         ec_step_ratio: d_cfg.ec_step_ratio,
@@ -122,24 +124,98 @@ async fn fetch_aggregated_config(
     })
 }
 
-/// Gom cấu hình và bắn MQTT xuống ESP32
-pub async fn sync_full_config_to_esp32(
+/// Hàm gom dữ liệu Config từ Database để tạo payload cho SENSOR NODE
+async fn fetch_sensor_node_config(
+    pool: &sqlx::SqlitePool,
+    device_id: &str,
+) -> Result<SensorNodeConfig, String> {
+    let cal = sqlx::query_as!(
+        SensorCalibration,
+        "SELECT * FROM sensor_calibration WHERE device_id = ?",
+        device_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("DB Error: {}", e))?
+    .unwrap_or_else(|| SensorCalibration {
+        device_id: device_id.to_string(),
+        ph_v7: 2.5,
+        ph_v4: 3.0,
+        ec_factor: 880.0,
+        ec_offset: 0.0,
+        temp_offset: 0.0,
+        temp_compensation_beta: 0.02,
+        sampling_interval: 1000,
+        publish_interval: 5000,
+        moving_average_window: 10,
+        is_ph_enabled: 1,
+        is_ec_enabled: 1,
+        is_temp_enabled: 1,
+        is_water_level_enabled: 1,
+        last_calibrated: String::new(),
+    });
+
+    // Mapping từ DB Models sang MQTT Payload
+    Ok(SensorNodeConfig {
+        device_id: device_id.to_string(),
+        ph_v7: cal.ph_v7 as f32,
+        ph_v4: cal.ph_v4 as f32,
+        ec_factor: cal.ec_factor as f32,
+        ec_offset: cal.ec_offset as f32,
+        temp_offset: cal.temp_offset as f32,
+        temp_compensation_beta: cal.temp_compensation_beta as f32,
+        sampling_interval: cal.sampling_interval as u32,
+        publish_interval: cal.publish_interval as u32,
+        moving_average_window: cal.moving_average_window as u8,
+
+        // Chuyển i64 trong DB thành bool cho JSON
+        is_ph_enabled: cal.is_ph_enabled != 0,
+        is_ec_enabled: cal.is_ec_enabled != 0,
+        is_temp_enabled: cal.is_temp_enabled != 0,
+        is_water_level_enabled: cal.is_water_level_enabled != 0,
+    })
+}
+
+/// Bắn MQTT cấu hình xuống CONTROLLER NODE
+pub async fn sync_controller_config_to_esp32(
     app_state: &web::Data<AppState>,
     device_id: &str,
 ) -> Result<(), String> {
-    let aggregated = fetch_aggregated_config(&app_state.sqlite_pool, device_id).await?;
-
-    let mqtt_topic = format!("AGITECH/{}/config", device_id);
+    let aggregated = fetch_controller_node_config(&app_state.sqlite_pool, device_id).await?;
+    let controller_mqtt_topic = format!("AGITECH/{}/controller/config", device_id);
     let mqtt_payload =
         serde_json::to_vec(&aggregated).map_err(|e| format!("Lỗi serialize payload: {:?}", e))?;
 
     app_state
         .mqtt_client
-        .publish(&mqtt_topic, QoS::AtLeastOnce, true, mqtt_payload)
+        .publish(&controller_mqtt_topic, QoS::AtLeastOnce, true, mqtt_payload)
         .await
         .map_err(|e| format!("Lỗi gửi MQTT: {:?}", e))?;
 
-    info!("Đã đồng bộ toàn bộ cấu hình xuống ESP32 ({})", device_id);
+    info!(
+        "Đã đồng bộ cấu hình CONTROLLER NODE xuống ESP32 ({})",
+        device_id
+    );
+    Ok(())
+}
+
+/// Bắn MQTT cấu hình xuống SENSOR NODE
+pub async fn sync_sensor_config_to_esp32(
+    app_state: &web::Data<AppState>,
+    device_id: &str,
+) -> Result<(), String> {
+    let sensor_config = fetch_sensor_node_config(&app_state.sqlite_pool, device_id).await?;
+    let sensor_mqtt_topic = format!("AGITECH/{}/sensor/config", device_id);
+    let mqtt_payload = serde_json::to_vec(&sensor_config)
+        .map_err(|e| format!("Lỗi serialize payload: {:?}", e))?;
+
+    app_state
+        .mqtt_client
+        .publish(&sensor_mqtt_topic, QoS::AtLeastOnce, true, mqtt_payload)
+        .await
+        .map_err(|e| format!("Lỗi gửi MQTT: {:?}", e))?;
+
+    info!("Đã đồng bộ cấu hình SENSOR NODE xuống Nút cảm biến ESP32");
     Ok(())
 }
 
@@ -177,8 +253,8 @@ pub async fn update_config(
             .json(json!({"error": "Failed to save configuration"}));
     }
 
-    // ĐỒNG BỘ MQTT
-    if let Err(e) = sync_full_config_to_esp32(&app_state, &device_id).await {
+    // ĐỒNG BỘ MQTT XUỐNG CONTROLLER
+    if let Err(e) = sync_controller_config_to_esp32(&app_state, &device_id).await {
         error!("Lưu DB thành công nhưng lỗi đồng bộ MQTT: {}", e);
         return HttpResponse::Accepted().json(json!({
             "status": "partial_success",
@@ -258,7 +334,7 @@ pub async fn update_water_config(
 
     match result {
         Ok(_) => {
-            let _ = sync_full_config_to_esp32(&app_state, &device_id).await; // ĐỒNG BỘ MQTT
+            let _ = sync_controller_config_to_esp32(&app_state, &device_id).await;
             HttpResponse::Ok().json(json!({"status": "success"}))
         }
         Err(e) => {
@@ -331,7 +407,7 @@ pub async fn update_safety_config(
 
     match result {
         Ok(_) => {
-            let _ = sync_full_config_to_esp32(&app_state, &device_id).await; // ĐỒNG BỘ MQTT
+            let _ = sync_controller_config_to_esp32(&app_state, &device_id).await;
             HttpResponse::Ok().json(json!({"status": "success"}))
         }
         Err(e) => HttpResponse::InternalServerError()
@@ -375,21 +451,44 @@ pub async fn update_sensor_calibration(
     let cal = req.into_inner();
     let now = Utc::now().to_rfc3339();
 
+    // ĐÃ CẬP NHẬT CÂU LỆNH ĐỂ BAO GỒM TOÀN BỘ CÁC TRƯỜNG MỚI
     let result = sqlx::query!(
         r#"
         INSERT INTO sensor_calibration (
-            device_id, ph_v7, ph_v4, ec_factor, temp_offset, last_calibrated
-        ) VALUES (?, ?, ?, ?, ?, ?)
+            device_id, ph_v7, ph_v4, ec_factor, ec_offset, temp_offset,
+            temp_compensation_beta, sampling_interval, publish_interval, moving_average_window,
+            is_ph_enabled, is_ec_enabled, is_temp_enabled, is_water_level_enabled, last_calibrated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
-            ph_v7 = excluded.ph_v7, ph_v4 = excluded.ph_v4,
-            ec_factor = excluded.ec_factor, temp_offset = excluded.temp_offset,
+            ph_v7 = excluded.ph_v7,
+            ph_v4 = excluded.ph_v4,
+            ec_factor = excluded.ec_factor,
+            ec_offset = excluded.ec_offset,
+            temp_offset = excluded.temp_offset,
+            temp_compensation_beta = excluded.temp_compensation_beta,
+            sampling_interval = excluded.sampling_interval,
+            publish_interval = excluded.publish_interval,
+            moving_average_window = excluded.moving_average_window,
+            is_ph_enabled = excluded.is_ph_enabled,
+            is_ec_enabled = excluded.is_ec_enabled,
+            is_temp_enabled = excluded.is_temp_enabled,
+            is_water_level_enabled = excluded.is_water_level_enabled,
             last_calibrated = excluded.last_calibrated
         "#,
         device_id,
         cal.ph_v7,
         cal.ph_v4,
         cal.ec_factor,
+        cal.ec_offset,
         cal.temp_offset,
+        cal.temp_compensation_beta,
+        cal.sampling_interval,
+        cal.publish_interval,
+        cal.moving_average_window,
+        cal.is_ph_enabled,
+        cal.is_ec_enabled,
+        cal.is_temp_enabled,
+        cal.is_water_level_enabled,
         now
     )
     .execute(&app_state.sqlite_pool)
@@ -397,12 +496,14 @@ pub async fn update_sensor_calibration(
 
     match result {
         Ok(_) => {
-            // Note: Cân nhắc xem Sensor Calibration có nằm trong Aggregated payload không,
-            // nếu không nằm trong thì bạn gọi hàm publish riếng giống code cũ của bạn nhé.
-            let _ = sync_full_config_to_esp32(&app_state, &device_id).await;
+            // ĐỒNG BỘ MQTT XUỐNG SENSOR NODE
+            let _ = sync_sensor_config_to_esp32(&app_state, &device_id).await;
             HttpResponse::Ok().json(json!({"status": "success"}))
         }
-        Err(e) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})),
+        Err(e) => {
+            error!("Lỗi DB Update Sensor: {:?}", e);
+            HttpResponse::InternalServerError().json(json!({"error": "DB Error"}))
+        }
     }
 }
 
@@ -427,7 +528,7 @@ pub async fn get_dosing_calibration(
     match result {
         Ok(Some(cal)) => HttpResponse::Ok().json(cal),
         Ok(None) => HttpResponse::NotFound().json(json!({"error": "Dosing calibration not found"})),
-        Err(e) => HttpResponse::InternalServerError().json(json!({"error": "Database error"})),
+        Err(_) => HttpResponse::InternalServerError().json(json!({"error": "Database error"})),
     }
 }
 
@@ -441,7 +542,6 @@ pub async fn update_dosing_calibration(
     let cal = req.into_inner();
     let now = Utc::now().to_rfc3339();
 
-    // SQL ĐÃ ĐƯỢC CẬP NHẬT THEO TRƯỜNG MỚI
     let result = sqlx::query!(
         r#"
         INSERT INTO dosing_calibration (
@@ -464,26 +564,37 @@ pub async fn update_dosing_calibration(
 
     match result {
         Ok(_) => {
-            let _ = sync_full_config_to_esp32(&app_state, &device_id).await; // ĐỒNG BỘ MQTT
+            let _ = sync_controller_config_to_esp32(&app_state, &device_id).await;
             HttpResponse::Ok().json(json!({"status": "success"}))
         }
-        Err(e) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})),
+        Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})),
     }
 }
 
 // ==========================================
-// API HANDLERS - AGGREGATED
+// API HANDLERS - AGGREGATED VIEWS (CHO FRONTEND)
 // ==========================================
 
 #[instrument(skip(app_state))]
-pub async fn get_esp32_aggregated_config(
+pub async fn get_controller_node_config(
     path: web::Path<String>,
     app_state: web::Data<AppState>,
 ) -> impl Responder {
     let device_id = path.into_inner();
-    // Tái sử dụng hàm helper ở trên
-    match fetch_aggregated_config(&app_state.sqlite_pool, &device_id).await {
+    match fetch_controller_node_config(&app_state.sqlite_pool, &device_id).await {
         Ok(aggregated) => HttpResponse::Ok().json(aggregated),
+        Err(e) => HttpResponse::NotFound().json(json!({"error": e})),
+    }
+}
+
+#[instrument(skip(app_state))]
+pub async fn get_sensor_node_config(
+    path: web::Path<String>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
+    let device_id = path.into_inner();
+    match fetch_sensor_node_config(&app_state.sqlite_pool, &device_id).await {
+        Ok(sensor_config) => HttpResponse::Ok().json(sensor_config),
         Err(e) => HttpResponse::NotFound().json(json!({"error": e})),
     }
 }
@@ -498,10 +609,14 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             // Base config
             .route("/{device_id}/config", web::get().to(get_config))
             .route("/{device_id}/config", web::put().to(update_config))
-            // Aggregated config
+            // Aggregated configs (Frontend xem trước payload gửi xuống MQTT)
             .route(
-                "/{device_id}/config/aggregated",
-                web::get().to(get_esp32_aggregated_config),
+                "/{device_id}/config/controller_node",
+                web::get().to(get_controller_node_config),
+            )
+            .route(
+                "/{device_id}/config/sensor_node",
+                web::get().to(get_sensor_node_config),
             )
             // Safety config
             .route(
@@ -538,4 +653,3 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             ),
     );
 }
-

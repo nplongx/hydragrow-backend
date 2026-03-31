@@ -24,20 +24,74 @@
         "type_info": "Float"
       },
       {
-        "name": "temp_offset",
+        "name": "ec_offset",
         "ordinal": 4,
         "type_info": "Float"
       },
       {
-        "name": "last_calibrated",
+        "name": "temp_offset",
         "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "temp_compensation_beta",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "sampling_interval",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "publish_interval",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "moving_average_window",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_ph_enabled",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_ec_enabled",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_temp_enabled",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_calibrated",
+        "ordinal": 13,
         "type_info": "Text"
+      },
+      {
+        "name": "is_water_level_enabled",
+        "ordinal": 14,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
       "Right": 1
     },
     "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
       false,
       false,
       false,
