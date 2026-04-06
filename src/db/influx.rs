@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use futures_util::stream;
 use influxdb2::Client;
 use influxdb2::models::DataPoint;
-use tracing::instrument;
+use tracing::{info, instrument};
 
 use crate::models::sensor::{SensorData, SensorDataRow};
 
@@ -13,10 +13,10 @@ pub async fn write_sensor_data(client: &Client, bucket: &str, data: &SensorData)
 
     let point = DataPoint::builder("sensor_data")
         .tag("device_id", &data.device_id)
-        .field("ec_value", data.ec_value)
-        .field("ph_value", data.ph_value)
-        .field("temp_value", data.temp_value)
-        .field("water_level", data.water_level)
+        .field("ec_value", data.ec_value as f64)
+        .field("ph_value", data.ph_value as f64)
+        .field("temp_value", data.temp_value as f64)
+        .field("water_level", data.water_level as f64)
         .field("pump_status", pump_status_json)
         .build()
         .context("Failed to build InfluxDB DataPoint")?;
@@ -35,12 +35,14 @@ pub async fn get_latest_sensor_data(
     bucket: &str,
     device_id: &str,
 ) -> Result<SensorData> {
+    // 🟢 ĐÃ THÊM HÀM PIVOT BẮT BUỘC CỦA INFLUXDB2
     let flux_query = format!(
         r#"
         from(bucket: "{}")
         |> range(start: -24h)
         |> filter(fn: (r) => r["_measurement"] == "sensor_data")
         |> filter(fn: (r) => r.device_id == "{}")
+        |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> sort(columns: ["_time"], desc: true)
         |> limit(n: 1)
         "#,
@@ -54,6 +56,7 @@ pub async fn get_latest_sensor_data(
         .context("Flux query failed")?;
 
     if let Some(table) = tables.first() {
+        info!("Lasted sensor: {:?}", table);
         return Ok(table.to_owned().into());
     }
 
@@ -62,3 +65,4 @@ pub async fn get_latest_sensor_data(
         device_id
     ))
 }
+

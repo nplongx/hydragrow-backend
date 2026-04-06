@@ -1,7 +1,7 @@
 use actix_web::{App, HttpServer, web};
 use anyhow::Context;
 use dotenvy::dotenv;
-use influxdb2::Client as InfluxClient;
+use influxdb2::Client as InfluxClient; // 🟢 QUAY LẠI DÙNG INFLUXDB2
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde::Serialize;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -12,7 +12,6 @@ use tracing_subscriber::FmtSubscriber;
 
 use crate::services::{scheduler::start_tuya_scheduler, solana::SolanaTraceability};
 
-// Khai báo các module trong dự án (tương ứng với cấu trúc thư mục)
 pub mod api;
 pub mod db;
 pub mod models;
@@ -42,39 +41,33 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 1. Load biến môi trường từ file .env
     dotenv().ok();
     env_logger::init();
 
-    // 2. Khởi tạo hệ thống Log (Tracing) cực kỳ mạnh mẽ
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("Lỗi khởi tạo tracing");
     info!("Bắt đầu khởi động hệ thống IoT Hydroponics...");
 
-    // 3. Khởi tạo kết nối SQLite với Connection Pool
-    let database_url = env::var("DATABASE_URL").expect("Thiếu biến DATABASE_URL trong .env");
+    let database_url = env::var("DATABASE_URL").expect("Thiếu biến DATABASE_URL");
     let sqlite_pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
         .await?;
-    info!("Đã kết nối thành công tới SQLite");
 
-    // 4. Khởi tạo kết nối InfluxDB
+    // 🟢 KHỞI TẠO INFLUXDB2 CHO CLOUD
     let influx_url = env::var("INFLUX_URL").expect("Thiếu biến INFLUX_URL");
     let influx_org = env::var("INFLUX_ORG").expect("Thiếu biến INFLUX_ORG");
     let influx_token = env::var("INFLUX_TOKEN").expect("Thiếu biến INFLUX_TOKEN");
     let influx_bucket = env::var("INFLUX_BUCKET").expect("Thiếu biến INFLUX_BUCKET");
     let influx_client = InfluxClient::new(influx_url, influx_org, influx_token);
-    info!("Đã khởi tạo client InfluxDB");
+    info!("Đã khởi tạo client InfluxDB Cloud (v2 API)");
 
-    // 5. Cấu hình và khởi tạo MQTT Client
     let mqtt_host = env::var("MQTT_HOST").unwrap_or_else(|_| "localhost".to_string());
     let mqtt_port: u16 = env::var("MQTT_PORT")
         .unwrap_or_else(|_| "1883".to_string())
         .parse()?;
-
     let mqtt_client_id =
         env::var("MQTT_CLIENT_ID").unwrap_or_else(|_| "rust_backend_server".to_string());
 
@@ -83,19 +76,15 @@ async fn main() -> anyhow::Result<()> {
     mqttoptions.set_clean_session(false);
 
     let (mqtt_client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
-    info!("Đã khởi tạo MQTT Client");
 
-    // 6. Khởi tạo Broadcast Channel cho WebSocket (Sức chứa 100 message)
     let wallet_data =
-        fs::read_to_string("server_wallet.json").expect("Không tìm thấy file server_wallet.json");
+        fs::read_to_string("server_wallet.json").expect("Không tìm thấy server_wallet.json");
     let private_key: Vec<u8> = serde_json::from_str(&wallet_data).unwrap();
-
-    // Khởi tạo dịch vụ Solana trỏ tới DEVNET
     let solana_service = SolanaTraceability::new("https://api.devnet.solana.com", &private_key);
     let (alert_sender, _) = broadcast::channel(100);
     let api_key = std::env::var("API_KEY").context("API_KEY must be set in .env")?;
     let device_states = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
-    // 7. Đóng gói tất cả vào AppState (dùng Arc để chia sẻ an toàn giữa các thread)
+
     let app_state = web::Data::new(AppState {
         sqlite_pool,
         influx_client,
@@ -107,44 +96,41 @@ async fn main() -> anyhow::Result<()> {
         solana_traceability: solana_service,
     });
 
-    // 8. Đăng ký nhận (Subscribe) các topic từ MQTT Broker
     mqtt_client
         .subscribe("AGITECH/+/sensors", QoS::AtMostOnce)
-        .await?;
+        .await
+        .expect("Lỗi sub");
     mqtt_client
         .subscribe("AGITECH/+/status", QoS::AtLeastOnce)
-        .await?;
+        .await
+        .expect("Lỗi sub");
     mqtt_client
         .subscribe("AGITECH/+/fsm", QoS::AtLeastOnce)
-        .await?;
+        .await
+        .expect("Lỗi sub");
     mqtt_client
         .subscribe("AGITECH/+/dosing_report", QoS::AtLeastOnce)
-        .await?;
+        .await
+        .expect("Lỗi sub");
 
-    // 9. Chạy vòng lặp lắng nghe MQTT trong một background task (Bắt buộc dùng tokio::spawn)
     let app_state_for_mqtt = app_state.clone();
     tokio::spawn(async move {
         info!("Bắt đầu vòng lặp sự kiện MQTT dưới nền...");
         loop {
             match eventloop.poll().await {
                 Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish))) => {
-                    // Chuyển việc xử lý message cho hàm process_message đã viết ở Bước 7
                     mqtt::handler::process_message(publish, app_state_for_mqtt.clone()).await;
                 }
-                Ok(_) => {} // Bỏ qua các sự kiện nội bộ khác của MQTT (Ping, Ack...)
+                Ok(_) => {}
                 Err(e) => {
-                    error!(
-                        "Mất kết nối MQTT, thử lại sau 30 giây... Chi tiết lỗi: {:?}",
-                        e
-                    );
+                    error!("Mất kết nối MQTT, thử lại sau 5 giây... Lỗi: {:?}", e);
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             }
         }
     });
 
-    let api_key = env::var("API_KEY").expect("Bạn phải cấu hình biến API_KEY để bảo mật API");
-
+    let api_key = env::var("API_KEY").expect("Thiếu API_KEY");
     let server_host = env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let server_port: u16 = env::var("SERVER_PORT")
         .unwrap_or_else(|_| "8080".to_string())
@@ -154,8 +140,6 @@ async fn main() -> anyhow::Result<()> {
         "🚀 API Server đang khởi chạy tại http://{}:{}",
         server_host, server_port
     );
-
-    // start_tuya_scheduler(app_state.clone(), "DEVICE_1".to_string()).await;
 
     HttpServer::new(move || {
         let auth_middleware = api::middleware::auth::ApiKeyAuth::new(api_key.clone());
@@ -177,3 +161,4 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
