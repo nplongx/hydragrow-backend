@@ -1,12 +1,10 @@
 use actix_web::{HttpResponse, Responder, web};
 use serde::Deserialize;
 use serde_json::json;
-use std::sync::Arc;
 use tracing::{error, instrument};
 
 use crate::AppState;
 use crate::db::influx::get_latest_sensor_data;
-use crate::models::sensor::SensorDataRow;
 
 /// Tham số Query String cho API lịch sử (VD: ?range=24h)
 #[derive(Deserialize, Debug)]
@@ -60,54 +58,94 @@ pub async fn get_history(
         range
     );
 
-    // LƯU Ý 1: Đã thêm dấu trừ (-) trước {} ở hàm range để lấy quá khứ (VD: -24h)
-    // LƯU Ý 2: Bạn nên kiểm tra lại dòng `limit(n: 1)`. Nếu đây là API biểu đồ thì nên bỏ dòng đó đi,
-    // hoặc dùng `aggregateWindow` nếu data quá lớn.
-    let flux_query = format!(
-        r#"
-        from(bucket: "{}")
-        |> range(start: -{}) 
-        |> filter(fn: (r) => r["_measurement"] == "sensor_data")
-        |> filter(fn: (r) => r.device_id == "{}")
-        |> sort(columns: ["_time"], desc: true)
-        |> limit(n: 100)     
-        "#,
-        app_state.influx_bucket, range, device_id
+    // Chuyển sang cú pháp InfluxQL (InfluxDB v1.x)
+    // Lưu ý: time >= now() - 24h là chuẩn của InfluxQL
+    let influx_query = format!(
+        "SELECT * FROM sensor_data WHERE device_id = '{}' AND time >= now() - {} ORDER BY time DESC LIMIT 100",
+        device_id, range
     );
 
-    // [DEBUG 2] In ra nguyên văn câu lệnh Flux.
-    // Mẹo: Bạn có thể copy câu này paste thẳng vào Data Explorer của InfluxDB UI để test chạy thử.
-    tracing::info!("Câu lệnh Flux Query được tạo ra:\n{}", flux_query);
+    // [DEBUG 2] In ra nguyên văn câu lệnh InfluxQL
+    tracing::info!("Câu lệnh InfluxQL được tạo ra:\n{}", influx_query);
 
-    let query_obj = influxdb2::models::Query::new(flux_query.clone());
+    let read_query = influxdb::ReadQuery::new(influx_query.clone());
 
-    match app_state
-        .influx_client
-        .query::<SensorDataRow>(Some(query_obj))
-        .await
-    {
-        Ok(tables) => {
-            // [DEBUG 3] In ra số lượng bản ghi trả về
-            tracing::info!("Query thành công! Trả về {} bản ghi.", tables.len());
+    match app_state.influx_client.query(read_query).await {
+        Ok(query_result_str) => {
+            // Parse chuỗi JSON trả về từ thư viện influxdb v0.8.0
+            match serde_json::from_str::<serde_json::Value>(&query_result_str) {
+                Ok(parsed) => {
+                    let mut history_data = Vec::new();
 
-            // [DEBUG 4] In ra dữ liệu thô (nếu data quá nhiều, bạn có thể cân nhắc comment dòng này lại sau khi fix xong)
-            tracing::debug!("Dữ liệu thô từ InfluxDB: {:#?}", tables);
+                    // Cấu trúc InfluxDB trả về: parsed["results"][0]["series"][0]
+                    if let Some(series_arr) = parsed["results"][0]["series"].as_array() {
+                        if let Some(first_series) = series_arr.first() {
+                            if let (Some(columns), Some(values_arr)) = (
+                                first_series["columns"].as_array(),
+                                first_series["values"].as_array(),
+                            ) {
+                                for val_row in values_arr {
+                                    if let Some(row_values) = val_row.as_array() {
+                                        let mut obj = serde_json::Map::new();
 
-            HttpResponse::Ok().json(serde_json::json!({
-                "status": "success",
-                "data": tables
-            }))
+                                        for (i, col) in columns.iter().enumerate() {
+                                            if let Some(col_name) = col.as_str() {
+                                                let col_val = row_values[i].clone();
+
+                                                // Nếu là pump_status, parse ngược lại thành JSON object để API trả về đẹp hơn
+                                                if col_name == "pump_status" {
+                                                    if let Some(ps_str) = col_val.as_str() {
+                                                        if let Ok(ps_obj) = serde_json::from_str::<
+                                                            serde_json::Value,
+                                                        >(
+                                                            ps_str
+                                                        ) {
+                                                            obj.insert(
+                                                                col_name.to_string(),
+                                                                ps_obj,
+                                                            );
+                                                            continue;
+                                                        }
+                                                    }
+                                                }
+
+                                                obj.insert(col_name.to_string(), col_val);
+                                            }
+                                        }
+                                        history_data.push(serde_json::Value::Object(obj));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // [DEBUG 3] In ra số lượng bản ghi trả về
+                    tracing::info!("Query thành công! Trả về {} bản ghi.", history_data.len());
+
+                    HttpResponse::Ok().json(json!({
+                        "status": "success",
+                        "data": history_data
+                    }))
+                }
+                Err(e) => {
+                    tracing::error!("Lỗi Parse JSON từ InfluxDB: {:?}", e);
+                    HttpResponse::InternalServerError().json(json!({
+                        "error": "Parse Error",
+                        "message": "Không thể xử lý dữ liệu trả về từ Database"
+                    }))
+                }
+            }
         }
         Err(e) => {
-            // [DEBUG 5] Ghi log lỗi kèm theo câu lệnh gây lỗi để dễ debug
+            // [DEBUG 4] Ghi log lỗi kèm theo câu lệnh gây lỗi
             tracing::error!(
                 "Lỗi khi query biểu đồ từ InfluxDB cho {}: {:?}",
                 device_id,
                 e
             );
-            tracing::error!("Câu lệnh Flux gây lỗi:\n{}", flux_query);
+            tracing::error!("Câu lệnh InfluxQL gây lỗi:\n{}", influx_query);
 
-            HttpResponse::InternalServerError().json(serde_json::json!({
+            HttpResponse::InternalServerError().json(json!({
                 "error": "Database Error",
                 "message": "Không thể truy xuất dữ liệu lịch sử"
             }))
@@ -122,3 +160,4 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route("/history", web::get().to(get_history)),
     );
 }
+

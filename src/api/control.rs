@@ -5,11 +5,11 @@ use serde_json::json;
 use tracing::{error, info, instrument, warn};
 
 use crate::AppState;
-use crate::services::tuya; // 🟢 Bật lại module tuya
+use crate::services::tuya; // Giả sử file tuya nằm trong folder services
 
 #[derive(Debug, Deserialize)]
 pub struct PumpControlReq {
-    pub pump: String, // "A", "B", "PH_UP", "PH_DOWN", "OSAKA_PUMP", "WATER_PUMP", "DRAIN_PUMP", "CIRCULATION_PUMP", "ALL"
+    pub pump: String, // "A", "B", "PH_UP", "PH_DOWN", "OSAKA_PUMP", "MIST_VALVE", "WATER_PUMP", "DRAIN_PUMP", "CIRCULATION_PUMP", "ALL"
     pub action: String, // "on", "off", "reset_fault", "set_pwm"
     pub duration_sec: Option<u64>,
     pub pwm: Option<u32>,
@@ -35,16 +35,16 @@ pub async fn control_pump(
     let device_id = path.into_inner();
     let req_data = req.into_inner();
 
-    // 🟢 Cập nhật danh sách thiết bị (Bỏ Mist_valve, thêm Circulation_pump)
     let valid_pumps = [
         "A",
         "B",
         "PH_UP",
         "PH_DOWN",
         "OSAKA_PUMP",
+        "MIST_VALVE",
         "WATER_PUMP",
         "DRAIN_PUMP",
-        "CIRCULATION_PUMP", // 🟢 Bơm tuần hoàn Tuya
+        "CIRCULATION_PUMP", // 🟢 Bơm tuần hoàn điều khiển qua Tuya
         "ALL",
     ];
 
@@ -60,39 +60,29 @@ pub async fn control_pump(
             .json(json!({"error": "Action must be 'on', 'off', 'reset_fault', or 'set_pwm'"}));
     }
 
-    // ==========================================
-    // 🟢 RẼ NHÁNH 1: ĐIỀU KHIỂN QUA TUYA CLOUD
-    // ==========================================
+    // 🟢 Xử lý riêng cho CIRCULATION_PUMP qua Tuya Cloud
     if req_data.pump == "CIRCULATION_PUMP" {
         let turn_on = match req_data.action.as_str() {
             "on" => true,
             "off" => false,
             _ => {
                 return HttpResponse::BadRequest()
-                    .json(json!({"error": "Chỉ hỗ trợ 'on' hoặc 'off' cho Bơm tuần hoàn"}));
+                    .json(json!({"error": "Circulation pump only supports on/off"}));
             }
         };
 
-        return match tuya::send_tuya_command(turn_on).await {
-            Ok(_) => {
-                info!(
-                    "☁️ Đã gửi lệnh {} cho CIRCULATION_PUMP qua Tuya Cloud",
-                    req_data.action
-                );
-                HttpResponse::Ok()
-                    .json(json!({"status": "success", "message": "Tuya command sent"}))
-            }
-            Err(e) => {
-                error!("❌ Lỗi điều khiển Tuya: {:?}", e);
-                HttpResponse::InternalServerError()
-                    .json(json!({"error": "Không thể gửi lệnh lên Tuya Cloud"}))
-            }
-        };
+        if let Err(e) = tuya::send_tuya_command(turn_on).await {
+            error!("Lỗi gửi lệnh Tuya: {:?}", e);
+            return HttpResponse::InternalServerError()
+                .json(json!({"error": format!("Tuya Error: {}", e)}));
+        }
+
+        info!("Đã gửi lệnh Tuya {} cho CIRCULATION_PUMP", req_data.action);
+        return HttpResponse::Ok()
+            .json(json!({"status": "success", "message": "Tuya command sent"}));
     }
 
-    // ==========================================
-    // 🟢 RẼ NHÁNH 2: ĐIỀU KHIỂN QUA MQTT (ESP32)
-    // ==========================================
+    // Xử lý các bơm khác qua MQTT
     let mqtt_action = match req_data.action.as_str() {
         "on" => "pump_on",
         "off" => "pump_off",
@@ -109,17 +99,17 @@ pub async fn control_pump(
     };
 
     if let Err(e) = publish_command(&app_state, &device_id, &command).await {
-        error!("❌ Lỗi gửi lệnh qua MQTT: {:?}", e);
+        error!("Lỗi gửi lệnh qua MQTT: {:?}", e);
         return HttpResponse::InternalServerError()
-            .json(json!({"error": "Không thể gửi lệnh xuống thiết bị ESP32"}));
+            .json(json!({"error": "Không thể gửi lệnh xuống thiết bị"}));
     }
 
     info!(
-        "📡 Đã gửi lệnh {} (pwm: {:?}) cho {} trên thiết bị {} qua MQTT",
+        "Đã gửi lệnh {} (pwm: {:?}) cho {} trên thiết bị {} qua MQTT",
         req_data.action, req_data.pwm, req_data.pump, device_id
     );
 
-    HttpResponse::Ok().json(json!({"status": "success", "message": "Command sent to ESP32"}))
+    HttpResponse::Ok().json(json!({"status": "success", "message": "Command sent"}))
 }
 
 async fn publish_command(

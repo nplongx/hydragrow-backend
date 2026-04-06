@@ -1,7 +1,7 @@
 use actix_web::{App, HttpServer, web};
 use anyhow::Context;
 use dotenvy::dotenv;
-use influxdb2::Client as InfluxClient;
+use influxdb::Client as InfluxClient; // 🟢 Đã đổi từ influxdb2 sang influxdb
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde::Serialize;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -61,13 +61,21 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     info!("Đã kết nối thành công tới SQLite");
 
-    // 4. Khởi tạo kết nối InfluxDB
+    // 4. Khởi tạo kết nối InfluxDB (Sử dụng API v1.x InfluxQL)
     let influx_url = env::var("INFLUX_URL").expect("Thiếu biến INFLUX_URL");
-    let influx_org = env::var("INFLUX_ORG").expect("Thiếu biến INFLUX_ORG");
-    let influx_token = env::var("INFLUX_TOKEN").expect("Thiếu biến INFLUX_TOKEN");
+    // INFLUX_BUCKET trong InfluxDB v1 chính là tên Database
     let influx_bucket = env::var("INFLUX_BUCKET").expect("Thiếu biến INFLUX_BUCKET");
-    let influx_client = InfluxClient::new(influx_url, influx_org, influx_token);
-    info!("Đã khởi tạo client InfluxDB");
+
+    // Khởi tạo Client cơ bản
+    let mut influx_client = InfluxClient::new(influx_url, influx_bucket.clone());
+
+    // Nếu có dùng Token (InfluxDB 1.8+ hoặc 2.x API v1 endpoint), cấu hình thêm Token
+    if let Ok(token) = env::var("INFLUX_TOKEN") {
+        if !token.is_empty() {
+            influx_client = influx_client.with_token(token);
+        }
+    }
+    info!("Đã khởi tạo client InfluxDB (v1 API)");
 
     // 5. Cấu hình và khởi tạo MQTT Client
     let mqtt_host = env::var("MQTT_HOST").unwrap_or_else(|_| "localhost".to_string());
@@ -95,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
     let (alert_sender, _) = broadcast::channel(100);
     let api_key = std::env::var("API_KEY").context("API_KEY must be set in .env")?;
     let device_states = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+
     // 7. Đóng gói tất cả vào AppState (dùng Arc để chia sẻ an toàn giữa các thread)
     let app_state = web::Data::new(AppState {
         sqlite_pool,
@@ -120,7 +129,6 @@ async fn main() -> anyhow::Result<()> {
     mqtt_client
         .subscribe("AGITECH/+/dosing_report", QoS::AtLeastOnce)
         .await?;
-
     // 9. Chạy vòng lặp lắng nghe MQTT trong một background task (Bắt buộc dùng tokio::spawn)
     let app_state_for_mqtt = app_state.clone();
     tokio::spawn(async move {
@@ -134,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
                 Ok(_) => {} // Bỏ qua các sự kiện nội bộ khác của MQTT (Ping, Ack...)
                 Err(e) => {
                     error!(
-                        "Mất kết nối MQTT, thử lại sau 30 giây... Chi tiết lỗi: {:?}",
+                        "Mất kết nối MQTT, thử lại sau 5 giây... Chi tiết lỗi: {:?}",
                         e
                     );
                     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -177,3 +185,4 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+

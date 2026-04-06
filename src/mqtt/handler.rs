@@ -1,4 +1,5 @@
 use actix_web::web;
+use chrono::DateTime;
 use rumqttc::Publish;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -31,15 +32,26 @@ struct FsmPayload {
     pub current_state: String,
 }
 
-// 🟢 ĐÃ SỬA: Bổ sung pump_status vào struct trung gian
+// 🟢 ĐÃ SỬA: Map chính xác tên key từ JSON của ESP32
 #[derive(Debug, Deserialize)]
 pub struct IncomingSensorPayload {
+    #[serde(rename = "temp_value")]
     pub temp: Option<f64>,
+
+    #[serde(rename = "ec_value")]
     pub ec: Option<f64>,
+
+    #[serde(rename = "ph_value")]
     pub ph: Option<f64>,
+
+    // Không cần rename vì JSON đã là water_level rồi
     pub water_level: Option<f64>,
-    pub timestamp_ms: Option<u64>,
-    pub pump_status: Option<PumpStatus>, // Hứng trạng thái bơm từ ESP32
+
+    // Đổi tên thành timestamp_str và kiểu String vì ESP đang gửi dạng chuỗi ISO8601
+    #[serde(rename = "timestamp")]
+    pub timestamp_str: Option<String>,
+
+    pub pump_status: Option<PumpStatus>,
 }
 
 #[instrument(skip(app_state, publish))]
@@ -76,7 +88,6 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
 }
 
 async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
-    // 1. Parse JSON khuyết bằng IncomingSensorPayload
     let incoming: IncomingSensorPayload = match serde_json::from_slice(payload) {
         Ok(data) => data,
         Err(e) => {
@@ -88,10 +99,12 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         }
     };
 
-    let current_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
+    let time = incoming
+        .timestamp_str
+        .as_deref()
+        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+        .unwrap_or_else(|| chrono::Utc::now().into())
+        .to_string();
 
     let sensor_data = SensorData {
         device_id: device_id.clone(),
@@ -99,11 +112,8 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         ec_value: incoming.ec.unwrap_or(0.0),
         ph_value: incoming.ph.unwrap_or(0.0),
         water_level: incoming.water_level.unwrap_or(0.0),
-        pump_status: incoming.pump_status.unwrap_or_default(), // Lấy trạng thái bơm, nếu không có thì mặc định false
-        timestamp: incoming
-            .timestamp_ms
-            .unwrap_or(current_ms as u64)
-            .to_string(),
+        pump_status: incoming.pump_status.unwrap_or_default(),
+        time,
     };
 
     // 🟢 ĐÃ SỬA: unwrap_or(0) thành unwrap_or(0.0) để đúng kiểu float (f32)
