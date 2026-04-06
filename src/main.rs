@@ -155,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
         server_host, server_port
     );
 
-    start_tuya_scheduler(app_state.clone(), "DEVICE_1".to_string()).await;
+    // start_tuya_scheduler(app_state.clone(), "DEVICE_1".to_string()).await;
 
     HttpServer::new(move || {
         let auth_middleware = api::middleware::auth::ApiKeyAuth::new(api_key.clone());

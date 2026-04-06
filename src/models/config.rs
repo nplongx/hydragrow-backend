@@ -26,19 +26,19 @@ pub struct SensorCalibration {
     pub ph_v7: f64,
     pub ph_v4: f64,
     pub ec_factor: f64,
-    pub ec_offset: f64, // Thêm mới từ DB
+    pub ec_offset: f64,
     pub temp_offset: f64,
-    pub temp_compensation_beta: f64, // Thêm mới từ DB
+    pub temp_compensation_beta: f64,
 
     // --- LỌC NHIỄU & TẦN SUẤT ---
-    pub sampling_interval: i64, // Đổi sang i64 cho chuẩn SQLite INTEGER
-    pub publish_interval: i64,  // Thêm mới từ DB
-    pub moving_average_window: i64, // Thêm mới từ DB
+    pub sampling_interval: i64,
+    pub publish_interval: i64,
+    pub moving_average_window: i64,
 
     // --- TRẠNG THÁI (SQLite lưu là INTEGER 0 hoặc 1) ---
-    pub is_ph_enabled: i64,   // Thêm mới từ DB
-    pub is_ec_enabled: i64,   // Thêm mới từ DB
-    pub is_temp_enabled: i64, // Thêm mới từ DB
+    pub is_ph_enabled: i64,
+    pub is_ec_enabled: i64,
+    pub is_temp_enabled: i64,
     pub is_water_level_enabled: i64,
 
     pub last_calibrated: String,
@@ -57,10 +57,10 @@ impl From<SensorCalibration> for SensorNodeConfig {
             sampling_interval: db_row.sampling_interval as u32,
             publish_interval: db_row.publish_interval as u32,
             moving_average_window: db_row.moving_average_window as u8,
-            is_ph_enabled: db_row.is_ph_enabled != 0, // Chuyển i64 thành bool
+            is_ph_enabled: db_row.is_ph_enabled != 0,
             is_ec_enabled: db_row.is_ec_enabled != 0,
             is_temp_enabled: db_row.is_temp_enabled != 0,
-            is_water_level_enabled: db_row.is_water_level_enabled != 0, // Nếu bảng chưa có thì mặc định là true
+            is_water_level_enabled: db_row.is_water_level_enabled != 0,
         }
     }
 }
@@ -84,15 +84,23 @@ pub struct DosingCalibration {
     pub ph_shift_up_per_ml: f64,
     pub ph_shift_down_per_ml: f64,
 
-    // --- CÁC TRƯỜNG ĐƯỢC CẬP NHẬT THEO ESP32 ---
     pub active_mixing_sec: i64,
     pub sensor_stabilize_sec: i64,
 
     pub ec_step_ratio: f64,
     pub ph_step_ratio: f64,
 
-    // --- CẬP NHẬT THEO ESP32 ---
     pub dosing_pump_capacity_ml_per_sec: f64,
+
+    // 🟢 THÊM: Các thông số điều tốc PWM
+    pub dosing_pwm_percent: i64,
+    pub osaka_mixing_pwm_percent: i64,
+
+    pub soft_start_duration: i64,
+
+    pub scheduled_mixing_interval_sec: i64,
+    pub scheduled_mixing_duration_sec: i64,
+
     pub last_calibrated: String,
 }
 
@@ -105,15 +113,23 @@ impl Default for DosingCalibration {
             ph_shift_up_per_ml: 0.02,
             ph_shift_down_per_ml: 0.025,
 
-            // Cập nhật giá trị mặc định giống ESP32
             active_mixing_sec: 5,
             sensor_stabilize_sec: 5,
 
             ec_step_ratio: 0.4,
             ph_step_ratio: 0.2,
 
-            // Cập nhật giá trị mặc định giống ESP32
             dosing_pump_capacity_ml_per_sec: 0.5,
+
+            // 🟢 THÊM: Mặc định PWM
+            dosing_pwm_percent: 50,
+            osaka_mixing_pwm_percent: 60,
+
+            soft_start_duration: 3000,
+
+            scheduled_mixing_interval_sec: 3600, // 1 tiếng trộn 1 lần
+            scheduled_mixing_duration_sec: 300,  // Trộn trong 5 phút
+
             last_calibrated: String::new(),
         }
     }
@@ -132,16 +148,22 @@ pub struct SafetyConfig {
     pub cooldown_sec: i64,
     pub max_dose_per_hour: f64,
 
-    pub water_level_critical_min: f64, // Mức nước nguy hiểm (cạn quá mức -> cháy bơm)
-    pub max_refill_cycles_per_hour: i64, // Chống kẹt phao (bơm liên tục)
-    pub max_drain_cycles_per_hour: i64, // Chống rò rỉ (xả liên tục)
-    pub max_refill_duration_sec: i64,  // Chống tràn (thời gian bơm max 1 lần)
-    pub max_drain_duration_sec: i64,   // Chống kẹt van xả
+    pub water_level_critical_min: f64,
+    pub max_refill_cycles_per_hour: i64,
+    pub max_drain_cycles_per_hour: i64,
+    pub max_refill_duration_sec: i64,
+    pub max_drain_duration_sec: i64,
 
     pub min_temp_limit: f64,
     pub max_temp_limit: f64,
 
     pub emergency_shutdown: i64,
+
+    // 🟢 Các ngưỡng ACK để xác nhận tín hiệu cảm biến
+    pub ec_ack_threshold: f64,
+    pub ph_ack_threshold: f64,
+    pub water_ack_threshold: f64,
+
     pub last_updated: String,
 }
 
@@ -166,6 +188,11 @@ impl Default for SafetyConfig {
             min_temp_limit: 10.0,
             max_temp_limit: 40.0,
             emergency_shutdown: 0,
+
+            ec_ack_threshold: 0.05,
+            ph_ack_threshold: 0.1,
+            water_ack_threshold: 0.5,
+
             last_updated: String::new(),
         }
     }
@@ -191,6 +218,7 @@ pub struct WaterConfig {
     pub water_change_interval_sec: i64,
     pub scheduled_drain_amount_cm: f64,
 
+    // 🟢 XÓA BỎ HOÀN TOÀN: misting_on_duration_ms và misting_off_duration_ms
     pub last_updated: String,
 }
 
@@ -213,6 +241,7 @@ impl Default for WaterConfig {
             scheduled_water_change_enabled: 0,
             water_change_interval_sec: 259200,
             scheduled_drain_amount_cm: 5.0,
+
             last_updated: String::new(),
         }
     }
@@ -247,6 +276,12 @@ pub struct ControllerNodeConfig {
     pub water_change_interval_sec: i64,
     pub scheduled_drain_amount_cm: f64,
 
+    // 🟢 LẬP LỊCH TRỘN VÀ TỐC ĐỘ (PWM)
+    pub scheduled_mixing_interval_sec: i64,
+    pub scheduled_mixing_duration_sec: i64,
+    pub dosing_pwm_percent: i64,
+    pub osaka_mixing_pwm_percent: i64,
+
     // --- 3. SAFETY CONFIG ---
     pub emergency_shutdown: bool,
     pub max_ec_limit: f64,
@@ -260,47 +295,52 @@ pub struct ControllerNodeConfig {
     pub max_refill_duration_sec: i64,
     pub max_drain_duration_sec: i64,
 
+    // 🟢 Ngưỡng ACK cho Firmware
+    pub ec_ack_threshold: f64,
+    pub ph_ack_threshold: f64,
+    pub water_ack_threshold: f64,
+
     // --- 4. DOSING & PUMP ---
     pub ec_gain_per_ml: f64,
     pub ph_shift_up_per_ml: f64,
     pub ph_shift_down_per_ml: f64,
 
-    // Đã thay thế và thêm mới để khớp ESP32
     pub active_mixing_sec: i64,
     pub sensor_stabilize_sec: i64,
 
     pub ec_step_ratio: f64,
     pub ph_step_ratio: f64,
 
-    // Đã đổi tên để khớp ESP32
     pub dosing_pump_capacity_ml_per_sec: f64,
+
+    // 🟢 Khởi động mềm cho Firmware
+    pub soft_start_duration: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SensorNodeConfig {
-    pub device_id: String, // (Thêm mới) Định danh gói tin
+    pub device_id: String,
 
     // --- HIỆU CHUẨN CẢM BIẾN (CALIBRATION) ---
-    pub ph_v7: f32,                  // Điện áp đo được ở pH 7.0
-    pub ph_v4: f32,                  // Điện áp đo được ở pH 4.0
-    pub ec_factor: f32,              // Hệ số quy đổi EC (mặc định 880.0)
-    pub ec_offset: f32,              // (Thêm mới) Điểm bù 0 cho EC
-    pub temp_offset: f32,            // Hệ số bù trừ sai số nhiệt độ
-    pub temp_compensation_beta: f32, // (Thêm mới) Bù trừ EC theo nhiệt độ (VD: 0.02)
+    pub ph_v7: f32,
+    pub ph_v4: f32,
+    pub ec_factor: f32,
+    pub ec_offset: f32,
+    pub temp_offset: f32,
+    pub temp_compensation_beta: f32,
 
     // --- CẤU HÌNH ĐỌC & LỌC NHIỄU (SAMPLING & FILTERING) ---
-    pub sampling_interval: u32,    // Thời gian lấy mẫu (ms) - VD: 1000
-    pub publish_interval: u32,     // (Thêm mới) Thời gian gửi MQTT (ms) - VD: 5000
-    pub moving_average_window: u8, // (Thêm mới) lọc nhiễu - VD: Lấy trung bình 10 mẫu
+    pub sampling_interval: u32,
+    pub publish_interval: u32,
+    pub moving_average_window: u8,
 
     // --- TRẠNG THÁI CẢM BIẾN (HARDWARE FLAGS) ---
-    pub is_ph_enabled: bool,          // (Thêm mới) Bật/tắt đọc pH
-    pub is_ec_enabled: bool,          // (Thêm mới) Bật/tắt đọc EC
-    pub is_temp_enabled: bool,        // (Thêm mới) Bật/tắt đọc Nhiệt độ
-    pub is_water_level_enabled: bool, // (Thêm mới) Bật/tắt đọc mực nước
+    pub is_ph_enabled: bool,
+    pub is_ec_enabled: bool,
+    pub is_temp_enabled: bool,
+    pub is_water_level_enabled: bool,
 }
 
-// Implement Default giúp bạn dễ dàng khởi tạo từ Database nếu thiếu trường
 impl Default for SensorNodeConfig {
     fn default() -> Self {
         Self {
@@ -321,3 +361,4 @@ impl Default for SensorNodeConfig {
         }
     }
 }
+

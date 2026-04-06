@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use actix_web::{HttpResponse, Responder, web};
 use chrono::Utc;
 use rumqttc::QoS;
@@ -77,7 +75,7 @@ async fn fetch_controller_node_config(
         ..Default::default()
     });
 
-    // Mapping sang ControllerNodeConfig
+    // Mapping sang ControllerNodeConfig (Đã được dọn dẹp, khớp 100% Firmware Thủy Canh)
     Ok(ControllerNodeConfig {
         device_id: device_id.to_string(),
         control_mode: base.control_mode.to_lowercase(),
@@ -111,16 +109,25 @@ async fn fetch_controller_node_config(
         water_level_critical_min: s_cfg.water_level_critical_min,
         max_refill_duration_sec: s_cfg.max_refill_duration_sec,
         max_drain_duration_sec: s_cfg.max_drain_duration_sec,
+        ec_ack_threshold: s_cfg.ec_ack_threshold,
+        ph_ack_threshold: s_cfg.ph_ack_threshold,
+        water_ack_threshold: s_cfg.water_ack_threshold,
 
         ec_gain_per_ml: d_cfg.ec_gain_per_ml,
         ph_shift_up_per_ml: d_cfg.ph_shift_up_per_ml,
         ph_shift_down_per_ml: d_cfg.ph_shift_down_per_ml,
-
         active_mixing_sec: d_cfg.active_mixing_sec,
         sensor_stabilize_sec: d_cfg.sensor_stabilize_sec,
         ec_step_ratio: d_cfg.ec_step_ratio,
         ph_step_ratio: d_cfg.ph_step_ratio,
         dosing_pump_capacity_ml_per_sec: d_cfg.dosing_pump_capacity_ml_per_sec,
+        
+        // 🟢 Cấu hình PWM và Trộn mới
+        soft_start_duration: d_cfg.soft_start_duration,
+        scheduled_mixing_interval_sec: d_cfg.scheduled_mixing_interval_sec,
+        scheduled_mixing_duration_sec: d_cfg.scheduled_mixing_duration_sec,
+        dosing_pwm_percent: d_cfg.dosing_pwm_percent,
+        osaka_mixing_pwm_percent: d_cfg.osaka_mixing_pwm_percent,
     })
 }
 
@@ -167,8 +174,6 @@ async fn fetch_sensor_node_config(
         sampling_interval: cal.sampling_interval as u32,
         publish_interval: cal.publish_interval as u32,
         moving_average_window: cal.moving_average_window as u8,
-
-        // Chuyển i64 trong DB thành bool cho JSON
         is_ph_enabled: cal.is_ph_enabled != 0,
         is_ec_enabled: cal.is_ec_enabled != 0,
         is_temp_enabled: cal.is_temp_enabled != 0,
@@ -303,6 +308,7 @@ pub async fn update_water_config(
     let config = req.into_inner();
     let now = Utc::now().to_rfc3339();
 
+    // 🟢 XÓA bỏ misting khỏi query INSERT và UPDATE
     let result = sqlx::query!(
         r#"
         INSERT INTO water_config (
@@ -314,22 +320,30 @@ pub async fn update_water_config(
             last_updated
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
-            water_level_min = excluded.water_level_min, water_level_target = excluded.water_level_target,
-            water_level_max = excluded.water_level_max, water_level_drain = excluded.water_level_drain,
-            circulation_mode = excluded.circulation_mode, circulation_on_sec = excluded.circulation_on_sec,
-            circulation_off_sec = excluded.circulation_off_sec, water_level_tolerance = excluded.water_level_tolerance,
-            auto_refill_enabled = excluded.auto_refill_enabled, auto_drain_overflow = excluded.auto_drain_overflow,
-            auto_dilute_enabled = excluded.auto_dilute_enabled, dilute_drain_amount_cm = excluded.dilute_drain_amount_cm,
+            water_level_min = excluded.water_level_min, 
+            water_level_target = excluded.water_level_target,
+            water_level_max = excluded.water_level_max, 
+            water_level_drain = excluded.water_level_drain,
+            circulation_mode = excluded.circulation_mode, 
+            circulation_on_sec = excluded.circulation_on_sec,
+            circulation_off_sec = excluded.circulation_off_sec, 
+            water_level_tolerance = excluded.water_level_tolerance,
+            auto_refill_enabled = excluded.auto_refill_enabled, 
+            auto_drain_overflow = excluded.auto_drain_overflow,
+            auto_dilute_enabled = excluded.auto_dilute_enabled, 
+            dilute_drain_amount_cm = excluded.dilute_drain_amount_cm,
             scheduled_water_change_enabled = excluded.scheduled_water_change_enabled,
             water_change_interval_sec = excluded.water_change_interval_sec,
-            scheduled_drain_amount_cm = excluded.scheduled_drain_amount_cm, last_updated = excluded.last_updated
+            scheduled_drain_amount_cm = excluded.scheduled_drain_amount_cm, 
+            last_updated = excluded.last_updated
         "#,
         device_id, config.water_level_min, config.water_level_target, config.water_level_max,
         config.water_level_drain, config.circulation_mode, config.circulation_on_sec,
         config.circulation_off_sec, config.water_level_tolerance, config.auto_refill_enabled,
         config.auto_drain_overflow, config.auto_dilute_enabled, config.dilute_drain_amount_cm,
         config.scheduled_water_change_enabled, config.water_change_interval_sec,
-        config.scheduled_drain_amount_cm, now
+        config.scheduled_drain_amount_cm, 
+        now
     ).execute(&app_state.sqlite_pool).await;
 
     match result {
@@ -386,8 +400,9 @@ pub async fn update_safety_config(
             device_id, max_ec_limit, min_ec_limit, min_ph_limit, max_ph_limit, max_ec_delta, max_ph_delta,
             max_dose_per_cycle, cooldown_sec, max_dose_per_hour, water_level_critical_min,
             max_refill_cycles_per_hour, max_drain_cycles_per_hour, max_refill_duration_sec,
-            max_drain_duration_sec, max_temp_limit, min_temp_limit, emergency_shutdown, last_updated
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            max_drain_duration_sec, max_temp_limit, min_temp_limit, emergency_shutdown, 
+            ec_ack_threshold, ph_ack_threshold, water_ack_threshold, last_updated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
             max_ec_limit = excluded.max_ec_limit, min_ec_limit = excluded.min_ec_limit, min_ph_limit = excluded.min_ph_limit,
             max_ph_limit = excluded.max_ph_limit, max_ec_delta = excluded.max_ec_delta, max_ph_delta = excluded.max_ph_delta,
@@ -396,13 +411,19 @@ pub async fn update_safety_config(
             max_refill_cycles_per_hour = excluded.max_refill_cycles_per_hour, max_drain_cycles_per_hour = excluded.max_drain_cycles_per_hour,
             max_refill_duration_sec = excluded.max_refill_duration_sec, max_drain_duration_sec = excluded.max_drain_duration_sec,
             max_temp_limit = excluded.max_temp_limit, min_temp_limit = excluded.min_temp_limit,
-            emergency_shutdown = excluded.emergency_shutdown, last_updated = excluded.last_updated
+            emergency_shutdown = excluded.emergency_shutdown, 
+            ec_ack_threshold = excluded.ec_ack_threshold, 
+            ph_ack_threshold = excluded.ph_ack_threshold, 
+            water_ack_threshold = excluded.water_ack_threshold, 
+            last_updated = excluded.last_updated
         "#,
         device_id, config.max_ec_limit, config.min_ec_limit, config.min_ph_limit, config.max_ph_limit,
         config.max_ec_delta, config.max_ph_delta, config.max_dose_per_cycle, config.cooldown_sec,
         config.max_dose_per_hour, config.water_level_critical_min, config.max_refill_cycles_per_hour,
         config.max_drain_cycles_per_hour, config.max_refill_duration_sec, config.max_drain_duration_sec,
-        config.max_temp_limit, config.min_temp_limit, config.emergency_shutdown, now
+        config.max_temp_limit, config.min_temp_limit, config.emergency_shutdown, 
+        config.ec_ack_threshold, config.ph_ack_threshold, config.water_ack_threshold,
+        now
     ).execute(&app_state.sqlite_pool).await;
 
     match result {
@@ -451,7 +472,6 @@ pub async fn update_sensor_calibration(
     let cal = req.into_inner();
     let now = Utc::now().to_rfc3339();
 
-    // ĐÃ CẬP NHẬT CÂU LỆNH ĐỂ BAO GỒM TOÀN BỘ CÁC TRƯỜNG MỚI
     let result = sqlx::query!(
         r#"
         INSERT INTO sensor_calibration (
@@ -496,7 +516,6 @@ pub async fn update_sensor_calibration(
 
     match result {
         Ok(_) => {
-            // ĐỒNG BỘ MQTT XUỐNG SENSOR NODE
             let _ = sync_sensor_config_to_esp32(&app_state, &device_id).await;
             HttpResponse::Ok().json(json!({"status": "success"}))
         }
@@ -542,24 +561,37 @@ pub async fn update_dosing_calibration(
     let cal = req.into_inner();
     let now = Utc::now().to_rfc3339();
 
+    // 🟢 THÊM LỆNH INSERT VÀ UPDATE CHO PWM & MIXING
     let result = sqlx::query!(
         r#"
         INSERT INTO dosing_calibration (
             device_id, tank_volume_l, ec_gain_per_ml, ph_shift_up_per_ml,
             ph_shift_down_per_ml, active_mixing_sec, sensor_stabilize_sec, ec_step_ratio, ph_step_ratio, 
-            dosing_pump_capacity_ml_per_sec, last_calibrated
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            dosing_pump_capacity_ml_per_sec, soft_start_duration, 
+            dosing_pwm_percent, osaka_mixing_pwm_percent, 
+            scheduled_mixing_interval_sec, scheduled_mixing_duration_sec,
+            last_calibrated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
             tank_volume_l = excluded.tank_volume_l, ec_gain_per_ml = excluded.ec_gain_per_ml,
             ph_shift_up_per_ml = excluded.ph_shift_up_per_ml, ph_shift_down_per_ml = excluded.ph_shift_down_per_ml,
             active_mixing_sec = excluded.active_mixing_sec, sensor_stabilize_sec = excluded.sensor_stabilize_sec,
             ec_step_ratio = excluded.ec_step_ratio, ph_step_ratio = excluded.ph_step_ratio, 
             dosing_pump_capacity_ml_per_sec = excluded.dosing_pump_capacity_ml_per_sec,
+            soft_start_duration = excluded.soft_start_duration, 
+            dosing_pwm_percent = excluded.dosing_pwm_percent, 
+            osaka_mixing_pwm_percent = excluded.osaka_mixing_pwm_percent, 
+            scheduled_mixing_interval_sec = excluded.scheduled_mixing_interval_sec,
+            scheduled_mixing_duration_sec = excluded.scheduled_mixing_duration_sec,
             last_calibrated = excluded.last_calibrated
         "#,
         device_id, cal.tank_volume_l, cal.ec_gain_per_ml, cal.ph_shift_up_per_ml,
         cal.ph_shift_down_per_ml, cal.active_mixing_sec, cal.sensor_stabilize_sec, cal.ec_step_ratio,
-        cal.ph_step_ratio, cal.dosing_pump_capacity_ml_per_sec, now
+        cal.ph_step_ratio, cal.dosing_pump_capacity_ml_per_sec, 
+        cal.soft_start_duration, 
+        cal.dosing_pwm_percent, cal.osaka_mixing_pwm_percent,
+        cal.scheduled_mixing_interval_sec, cal.scheduled_mixing_duration_sec,
+        now
     ).execute(&app_state.sqlite_pool).await;
 
     match result {
@@ -567,7 +599,10 @@ pub async fn update_dosing_calibration(
             let _ = sync_controller_config_to_esp32(&app_state, &device_id).await;
             HttpResponse::Ok().json(json!({"status": "success"}))
         }
-        Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})),
+        Err(e) => {
+            error!("Lỗi DB Update Dosing Config: {:?}", e);
+            HttpResponse::InternalServerError().json(json!({"error": "DB Error"}))
+        }
     }
 }
 

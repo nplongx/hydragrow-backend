@@ -5,21 +5,24 @@ use serde_json::json;
 use tracing::{error, info, instrument, warn};
 
 use crate::AppState;
-use crate::services::tuya;
+use crate::services::tuya; // 🟢 Bật lại module tuya
 
 #[derive(Debug, Deserialize)]
 pub struct PumpControlReq {
-    pub pump: String, // "A", "B", "PH_UP", "PH_DOWN", "CIRCULATION", "CHAMBER_PUMP", "WATER_PUMP"
-    pub action: String, // "on" hoặc "off"
+    pub pump: String, // "A", "B", "PH_UP", "PH_DOWN", "OSAKA_PUMP", "WATER_PUMP", "DRAIN_PUMP", "CIRCULATION_PUMP", "ALL"
+    pub action: String, // "on", "off", "reset_fault", "set_pwm"
     pub duration_sec: Option<u64>,
+    pub pwm: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
 struct MqttCommandPayload {
-    pub action: String, // Firmware ESP32 sẽ nhận "pump_on" hoặc "pump_off"
+    pub action: String,
     pub pump: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_sec: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pwm: Option<u32>,
 }
 
 /// POST /api/devices/{device_id}/control
@@ -32,68 +35,91 @@ pub async fn control_pump(
     let device_id = path.into_inner();
     let req_data = req.into_inner();
 
+    // 🟢 Cập nhật danh sách thiết bị (Bỏ Mist_valve, thêm Circulation_pump)
     let valid_pumps = [
         "A",
         "B",
         "PH_UP",
         "PH_DOWN",
-        "CIRCULATION",
-        "CHAMBER_PUMP",
+        "OSAKA_PUMP",
         "WATER_PUMP",
         "DRAIN_PUMP",
+        "CIRCULATION_PUMP", // 🟢 Bơm tuần hoàn Tuya
+        "ALL",
     ];
 
     if !valid_pumps.contains(&req_data.pump.as_str()) {
-        warn!("Từ chối lệnh: Tên bơm không hợp lệ ({})", req_data.pump);
+        warn!("Từ chối lệnh: Tên bơm/van không hợp lệ ({})", req_data.pump);
         return HttpResponse::BadRequest().json(json!({"error": "Invalid pump name"}));
     }
 
-    if req_data.action != "on" && req_data.action != "off" {
+    let valid_actions = ["on", "off", "reset_fault", "set_pwm"];
+    if !valid_actions.contains(&req_data.action.as_str()) {
         warn!("Từ chối lệnh: Hành động không hợp lệ ({})", req_data.action);
-        return HttpResponse::BadRequest().json(json!({"error": "Action must be 'on' or 'off'"}));
+        return HttpResponse::BadRequest()
+            .json(json!({"error": "Action must be 'on', 'off', 'reset_fault', or 'set_pwm'"}));
     }
 
-    if req_data.pump == "CIRCULATION" {
-        let is_on = req_data.action == "on";
-        // match tuya::send_tuya_command(is_on).await {
-        //     Ok(_) => {
-        //         info!(
-        //             "Đã {} bơm tuần hoàn qua Tuya API cho thiết bị {}",
-        //             if is_on { "BẬT" } else { "TẮT" },
-        //             device_id
-        //         );
-        //         return HttpResponse::Ok().json(json!({"status": "success"}));
-        //     }
-        //     Err(e) => {
-        //         error!("Lỗi Tuya API: {:?}", e);
-        //         return HttpResponse::InternalServerError().json(json!({"error": e.to_string()}));
-        //     }
-        // }
+    // ==========================================
+    // 🟢 RẼ NHÁNH 1: ĐIỀU KHIỂN QUA TUYA CLOUD
+    // ==========================================
+    if req_data.pump == "CIRCULATION_PUMP" {
+        let turn_on = match req_data.action.as_str() {
+            "on" => true,
+            "off" => false,
+            _ => {
+                return HttpResponse::BadRequest()
+                    .json(json!({"error": "Chỉ hỗ trợ 'on' hoặc 'off' cho Bơm tuần hoàn"}));
+            }
+        };
+
+        return match tuya::send_tuya_command(turn_on).await {
+            Ok(_) => {
+                info!(
+                    "☁️ Đã gửi lệnh {} cho CIRCULATION_PUMP qua Tuya Cloud",
+                    req_data.action
+                );
+                HttpResponse::Ok()
+                    .json(json!({"status": "success", "message": "Tuya command sent"}))
+            }
+            Err(e) => {
+                error!("❌ Lỗi điều khiển Tuya: {:?}", e);
+                HttpResponse::InternalServerError()
+                    .json(json!({"error": "Không thể gửi lệnh lên Tuya Cloud"}))
+            }
+        };
     }
 
-    let mqtt_action = if req_data.action == "on" {
-        "pump_on"
-    } else {
-        "pump_off"
+    // ==========================================
+    // 🟢 RẼ NHÁNH 2: ĐIỀU KHIỂN QUA MQTT (ESP32)
+    // ==========================================
+    let mqtt_action = match req_data.action.as_str() {
+        "on" => "pump_on",
+        "off" => "pump_off",
+        "reset_fault" => "reset_fault",
+        "set_pwm" => "set_pwm",
+        _ => "pump_off",
     };
 
     let command = MqttCommandPayload {
         action: mqtt_action.to_string(),
         pump: req_data.pump.clone(),
         duration_sec: req_data.duration_sec,
+        pwm: req_data.pwm,
     };
 
     if let Err(e) = publish_command(&app_state, &device_id, &command).await {
-        error!("Lỗi gửi lệnh bơm qua MQTT: {:?}", e);
+        error!("❌ Lỗi gửi lệnh qua MQTT: {:?}", e);
         return HttpResponse::InternalServerError()
-            .json(json!({"error": "Không thể gửi lệnh xuống thiết bị"}));
+            .json(json!({"error": "Không thể gửi lệnh xuống thiết bị ESP32"}));
     }
 
     info!(
-        "Đã gửi lệnh {} cho bơm {} trên thiết bị {} qua MQTT",
-        req_data.action, req_data.pump, device_id
+        "📡 Đã gửi lệnh {} (pwm: {:?}) cho {} trên thiết bị {} qua MQTT",
+        req_data.action, req_data.pwm, req_data.pump, device_id
     );
-    HttpResponse::Ok().json(json!({"status": "success", "message": "Command sent"}))
+
+    HttpResponse::Ok().json(json!({"status": "success", "message": "Command sent to ESP32"}))
 }
 
 async fn publish_command(
@@ -101,7 +127,7 @@ async fn publish_command(
     device_id: &str,
     payload: &MqttCommandPayload,
 ) -> anyhow::Result<()> {
-    let topic = format!("AGITECH/{}/command", device_id);
+    let topic = format!("AGITECH/{}/controller/command", device_id);
     let payload_bytes = serde_json::to_vec(payload)?;
 
     app_state
@@ -117,3 +143,4 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/api/devices/{device_id}/control").route("", web::post().to(control_pump)),
     );
 }
+

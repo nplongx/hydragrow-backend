@@ -73,27 +73,26 @@ pub async fn get_safety_config(pool: &SqlitePool, device_id: &str) -> Result<Saf
         r#"
         SELECT
             device_id,
-            min_ec_limit,
             max_ec_limit,
+            min_ec_limit,
             min_ph_limit,
             max_ph_limit,
             max_ec_delta,
             max_ph_delta,
-
             max_dose_per_cycle,
             cooldown_sec,
             max_dose_per_hour,
-
             water_level_critical_min,
             max_refill_cycles_per_hour,
             max_drain_cycles_per_hour,
             max_refill_duration_sec,
             max_drain_duration_sec,
-
             min_temp_limit,
             max_temp_limit,
-
             emergency_shutdown,
+            ec_ack_threshold,     -- 🟢 Trường mới
+            ph_ack_threshold,     -- 🟢 Trường mới
+            water_ack_threshold,  -- 🟢 Trường mới
             last_updated
         FROM safety_config
         WHERE device_id = ?
@@ -112,43 +111,41 @@ pub async fn upsert_safety_config(pool: &SqlitePool, config: &SafetyConfig) -> R
     sqlx::query!(
         r#"
     INSERT INTO safety_config (
-        device_id, max_ec_limit, min_ec_limit, min_ph_limit, max_ph_limit, max_ec_delta, max_ph_delta,
-            max_dose_per_cycle, cooldown_sec, max_dose_per_hour, water_level_critical_min,
-            max_refill_cycles_per_hour, max_drain_cycles_per_hour, max_refill_duration_sec,
-            max_drain_duration_sec, min_temp_limit, max_temp_limit, emergency_shutdown, last_updated
+        device_id, 
+        max_ec_limit, min_ec_limit, min_ph_limit, max_ph_limit, max_ec_delta, max_ph_delta,
+        max_dose_per_cycle, cooldown_sec, max_dose_per_hour, water_level_critical_min,
+        max_refill_cycles_per_hour, max_drain_cycles_per_hour, max_refill_duration_sec,
+        max_drain_duration_sec, min_temp_limit, max_temp_limit, emergency_shutdown,
+        ec_ack_threshold, ph_ack_threshold, water_ack_threshold, last_updated
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
     ON CONFLICT(device_id) DO UPDATE SET
-
-        min_ec_limit = excluded.min_ec_limit,
         max_ec_limit = excluded.max_ec_limit,
+        min_ec_limit = excluded.min_ec_limit,
         min_ph_limit = excluded.min_ph_limit,
         max_ph_limit = excluded.max_ph_limit,
         max_ec_delta = excluded.max_ec_delta,
         max_ph_delta = excluded.max_ph_delta,
-
         max_dose_per_cycle = excluded.max_dose_per_cycle,
         cooldown_sec = excluded.cooldown_sec,
         max_dose_per_hour = excluded.max_dose_per_hour,
-
         water_level_critical_min = excluded.water_level_critical_min,
-
         max_refill_cycles_per_hour = excluded.max_refill_cycles_per_hour,
         max_drain_cycles_per_hour = excluded.max_drain_cycles_per_hour,
-
         max_refill_duration_sec = excluded.max_refill_duration_sec,
         max_drain_duration_sec = excluded.max_drain_duration_sec,
-
         min_temp_limit = excluded.min_temp_limit,
         max_temp_limit = excluded.max_temp_limit,
-
         emergency_shutdown = excluded.emergency_shutdown,
+        ec_ack_threshold = excluded.ec_ack_threshold,
+        ph_ack_threshold = excluded.ph_ack_threshold,
+        water_ack_threshold = excluded.water_ack_threshold,
         last_updated = excluded.last_updated
     "#,
         config.device_id,
+        config.max_ec_limit, // 🟢 Đã sửa lại đúng thứ tự so với struct
         config.min_ec_limit,
-        config.max_ec_limit,
         config.min_ph_limit,
         config.max_ph_limit,
         config.max_ec_delta,
@@ -164,6 +161,9 @@ pub async fn upsert_safety_config(pool: &SqlitePool, config: &SafetyConfig) -> R
         config.min_temp_limit,
         config.max_temp_limit,
         config.emergency_shutdown,
+        config.ec_ack_threshold,    // 🟢 Trường mới
+        config.ph_ack_threshold,    // 🟢 Trường mới
+        config.water_ack_threshold, // 🟢 Trường mới
         config.last_updated
     )
     .execute(pool)
@@ -180,7 +180,7 @@ pub async fn insert_blockchain_tx(
     tx_id: &str,
 ) -> Result<(), Error> {
     let explorer_url = format!("https://solscan.io/tx/{}?cluster=devnet", tx_id);
-    let now = Utc::now().to_rfc3339();
+    // Lưu ý: Utc::now() không được gọi ở đây nếu trong SQL không lưu. DB đang tự set CURRENT_TIMESTAMP nhưng nếu bạn muốn đồng nhất có thể dùng.
 
     sqlx::query!(
         r#"
@@ -219,3 +219,4 @@ pub async fn get_device_blockchain_history(
 
     Ok(history)
 }
+

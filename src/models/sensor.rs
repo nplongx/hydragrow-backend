@@ -2,6 +2,8 @@ use influxdb2::FromDataPoint;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+// Bạn có thể xóa DeviceState nếu không còn nơi nào trong Frontend/Backend dùng đến nó.
+// Mình tạm giữ lại để tránh lỗi compile ở các file khác (nếu có).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceState {
@@ -11,26 +13,17 @@ pub enum DeviceState {
 }
 
 /// Trạng thái hoạt động của các máy bơm (Pump)
-/// Parse trực tiếp từ MQTT JSON payload của ESP32
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// ĐÃ SỬA: Chuyển sang dùng bool và tên biến chuẩn khớp 100% với ESP32
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct PumpStatus {
-    #[serde(rename = "A")]
-    pub pump_a: DeviceState,
-
-    #[serde(rename = "B")]
-    pub pump_b: DeviceState,
-
-    #[serde(rename = "PH_UP")]
-    pub ph_up: DeviceState,
-
-    #[serde(rename = "PH_DOWN")]
-    pub ph_down: DeviceState,
-
-    #[serde(rename = "CHAMBER_PUMP")]
-    pub chamber_pump: DeviceState,
-
-    #[serde(rename = "WATER_PUMP")]
-    pub water_pump: DeviceState,
+    pub pump_a: bool,
+    pub pump_b: bool,
+    pub ph_up: bool,
+    pub ph_down: bool,
+    pub osaka_pump: bool,
+    pub mist_valve: bool,
+    pub water_pump_in: bool,
+    pub water_pump_out: bool,
 }
 
 /// Cấu trúc Sensor đẩy vào InfluxDB và trả về Client
@@ -50,7 +43,10 @@ pub struct SensorData {
     #[validate(range(min = 0.0))]
     pub water_level: f64,
 
+    #[serde(default)]
     pub pump_status: PumpStatus,
+
+    #[serde(default)]
     pub timestamp: String,
 }
 
@@ -80,10 +76,14 @@ impl From<SensorDataRow> for SensorData {
         }
     }
 }
-/// Request điều khiển Bơm từ Frontend
+
+/// Request điều khiển Bơm từ Frontend (Nếu bạn còn dùng struct này ở đâu đó)
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct PumpCommandReq {
     #[validate(length(min = 1))]
-    pub pump_id: String, // "A", "B", "PH_UP", "WATER_PUMP", v.v.
-    pub action: DeviceState, // "on" | "off"
+    pub pump_id: String, // "A", "B", "PH_UP", "WATER_PUMP", "ALL", v.v.
+
+    // ĐÃ SỬA: Chuyển sang String để có thể truyền lệnh "reset_fault" bên cạnh "on" / "off"
+    pub action: String,
 }
+
