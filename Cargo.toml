@@ -16,7 +16,6 @@ actix-ws = "0.2"
 futures-util = "0.3"
 
 # Database: InfluxDB
-influxdb = { version = "0.8.0", features = ["derive", "serde", "chrono"] }
 
 # MQTT (Đã tắt TLS mặc định, dùng native)
 rumqttc = { version = "0.24.0", default-features = false, features = [
@@ -51,8 +50,10 @@ reqwest = { version = "0.11", features = ["json"] }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
-validator = { version = "0.20.0", features = ["derive"] }
 
 # Solana
+validator = { version = "0.20.0", features = ["derive"] }
 solana-client = "2.0.9"
 solana-sdk = "2.0.9"
+influxdb2 = "0.5.2"
+influxdb2-structmap = "0.2.0"

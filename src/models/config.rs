@@ -295,4 +295,3 @@ impl Default for SensorNodeConfig {
         }
     }
 }
-

@@ -32,7 +32,6 @@ struct FsmPayload {
     pub current_state: String,
 }
 
-// 🟢 ĐÃ SỬA: Map chính xác tên key từ JSON của ESP32
 #[derive(Debug, Deserialize)]
 pub struct IncomingSensorPayload {
     #[serde(rename = "temp_value")]
@@ -44,12 +43,10 @@ pub struct IncomingSensorPayload {
     #[serde(rename = "ph_value")]
     pub ph: Option<f64>,
 
-    // Không cần rename vì JSON đã là water_level rồi
     pub water_level: Option<f64>,
 
-    // Đổi tên thành timestamp_str và kiểu String vì ESP đang gửi dạng chuỗi ISO8601
-    #[serde(rename = "timestamp")]
-    pub timestamp_str: Option<String>,
+    // 🟢 ĐÃ SỬA: Đổi lại thành timestamp_ms và kiểu u64 để khớp 100% với ESP32
+    pub timestamp_ms: Option<u64>,
 
     pub pump_status: Option<PumpStatus>,
 }
@@ -99,13 +96,14 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         }
     };
 
+    // 🟢 ĐÃ SỬA: Convert từ số millis (u64) sang chuỗi ISO 8601
     let time = incoming
-        .timestamp_str
-        .as_deref()
-        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
-        .unwrap_or_else(|| chrono::Utc::now().into())
-        .to_string();
+        .timestamp_ms
+        .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms as i64))
+        .unwrap_or_else(|| chrono::Utc::now())
+        .to_rfc3339();
 
+    // Khởi tạo struct SensorData chuẩn của toàn hệ thống
     let sensor_data = SensorData {
         device_id: device_id.clone(),
         temp_value: incoming.temp.unwrap_or(0.0),
@@ -116,39 +114,30 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         time,
     };
 
-    // 🟢 ĐÃ SỬA: unwrap_or(0) thành unwrap_or(0.0) để đúng kiểu float (f32)
     debug!(
         "Nhận dữ liệu cảm biến từ {}: ph={:.2}, ec={:.2}",
-        device_id,
-        incoming.ph.unwrap_or(0.0),
-        incoming.ec.unwrap_or(0.0)
+        device_id, sensor_data.ph_value, sensor_data.ec_value
     );
 
-    // 3. Ghi dữ liệu vào InfluxDB
+    // Ghi dữ liệu vào InfluxDB
     if let Err(e) = write_sensor_data(
         &app_state.influx_client,
         &app_state.influx_bucket,
-        &sensor_data, // Truyền struct chuẩn vào DB Influx
+        &sensor_data,
     )
     .await
     {
         error!("Lỗi lưu SensorData vào InfluxDB ({}): {:?}", device_id, e);
     }
 
-    // 4. 🟢 ĐÃ SỬA: Bắn cả pump_status qua WebSocket cho Frontend
+    // 🟢 ĐÃ SỬA: Đóng gói JSON chuẩn cấu trúc cho Tauri
+    // Dùng key "payload" và ném nguyên cục sensor_data vào để Tauri mapping vào struct SensorData
     let ws_msg = json!({
         "type": "sensor_update",
-        "device_id": device_id,
-        "data": {
-            "temp": incoming.temp,
-            "ec": incoming.ec,
-            "ph": incoming.ph,
-            "water_level": incoming.water_level,
-            "pump_status": sensor_data.pump_status // Frontend sẽ dùng cái này để sáng/tắt đèn báo bơm
-        }
+        "payload": sensor_data
     });
 
-    let _ = app_state.alert_sender.send(ws_msg.to_string());
+    let _ = app_state.sensor_sender.send(sensor_data);
 }
 
 async fn handle_device_status(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
