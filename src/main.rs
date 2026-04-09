@@ -79,6 +79,19 @@ async fn main() -> anyhow::Result<()> {
     mqttoptions.set_keep_alive(Duration::from_secs(30));
     mqttoptions.set_clean_session(false);
 
+    // ==========================================
+    // 🟢 ĐÃ THÊM: XÁC THỰC USERNAME/PASSWORD CHO MQTT
+    // ==========================================
+    let mqtt_user = env::var("MQTT_USER").unwrap_or_default();
+    let mqtt_pass = env::var("MQTT_PASSWORD").unwrap_or_default();
+    if !mqtt_user.is_empty() && !mqtt_pass.is_empty() {
+        mqttoptions.set_credentials(&mqtt_user, mqtt_pass);
+        info!("Đã cấu hình xác thực MQTT với user: {}", mqtt_user);
+    } else {
+        info!("Cảnh báo: Không tìm thấy MQTT_USER/MQTT_PASSWORD trong .env, kết nối ẩn danh.");
+    }
+    // ==========================================
+
     let (mqtt_client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
     let wallet_data =
@@ -108,19 +121,19 @@ async fn main() -> anyhow::Result<()> {
     mqtt_client
         .subscribe("AGITECH/+/sensors", QoS::AtMostOnce)
         .await
-        .expect("Lỗi sub");
+        .expect("Lỗi sub sensors");
     mqtt_client
         .subscribe("AGITECH/+/status", QoS::AtLeastOnce)
         .await
-        .expect("Lỗi sub");
+        .expect("Lỗi sub status");
     mqtt_client
         .subscribe("AGITECH/+/fsm", QoS::AtLeastOnce)
         .await
-        .expect("Lỗi sub");
+        .expect("Lỗi sub fsm");
     mqtt_client
         .subscribe("AGITECH/+/dosing_report", QoS::AtLeastOnce)
         .await
-        .expect("Lỗi sub");
+        .expect("Lỗi sub dosing_report");
 
     let app_state_for_mqtt = app_state.clone();
     tokio::spawn(async move {
@@ -139,7 +152,6 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let api_key = env::var("API_KEY").expect("Thiếu API_KEY");
     let server_host = env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let server_port: u16 = env::var("SERVER_PORT")
         .unwrap_or_else(|_| "8080".to_string())
@@ -151,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     HttpServer::new(move || {
-        let auth_middleware = api::middleware::auth::ApiKeyAuth::new(api_key.clone());
+        let auth_middleware = api::middleware::auth::ApiKeyAuth::new(app_state.api_key.clone());
         let rate_limit_middleware = api::middleware::rate_limit::RateLimiter::new(60, 60);
 
         App::new()
@@ -170,4 +182,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-
