@@ -1,5 +1,7 @@
+use std::time::UNIX_EPOCH;
+
 use actix_web::web;
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use rumqttc::Publish;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -7,7 +9,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::AppState;
 use crate::db::influx::write_sensor_data;
-// 🟢 MỚI: Đảm bảo bạn đã import PumpStatus (giả định nó nằm cùng chỗ với SensorData)
+use crate::models::alert::AlertMessage;
 use crate::models::sensor::{PumpStatus, SensorData};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -24,7 +26,7 @@ pub struct DosingReportPayload {
 
 #[derive(Deserialize)]
 struct DeviceStatusPayload {
-    online: bool,
+    pub online: bool,
 }
 
 #[derive(Deserialize)]
@@ -44,10 +46,7 @@ pub struct IncomingSensorPayload {
     pub ph: Option<f64>,
 
     pub water_level: Option<f64>,
-
-    // 🟢 ĐÃ SỬA: Đổi lại thành timestamp_ms và kiểu u64 để khớp 100% với ESP32
     pub timestamp_ms: Option<u64>,
-
     pub pump_status: Option<PumpStatus>,
 }
 
@@ -96,14 +95,12 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         }
     };
 
-    // 🟢 ĐÃ SỬA: Convert từ số millis (u64) sang chuỗi ISO 8601
     let time = incoming
         .timestamp_ms
         .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms as i64))
         .unwrap_or_else(|| chrono::Utc::now())
         .to_rfc3339();
 
-    // Khởi tạo struct SensorData chuẩn của toàn hệ thống
     let sensor_data = SensorData {
         device_id: device_id.clone(),
         temp_value: incoming.temp.unwrap_or(0.0),
@@ -119,7 +116,6 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         device_id, sensor_data.ph_value, sensor_data.ec_value
     );
 
-    // Ghi dữ liệu vào InfluxDB
     if let Err(e) = write_sensor_data(
         &app_state.influx_client,
         &app_state.influx_bucket,
@@ -130,13 +126,7 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         error!("Lỗi lưu SensorData vào InfluxDB ({}): {:?}", device_id, e);
     }
 
-    // 🟢 ĐÃ SỬA: Đóng gói JSON chuẩn cấu trúc cho Tauri
-    // Dùng key "payload" và ném nguyên cục sensor_data vào để Tauri mapping vào struct SensorData
-    let ws_msg = json!({
-        "type": "sensor_update",
-        "payload": sensor_data
-    });
-
+    // Gửi sang luồng WebSocket (ws.rs sẽ tự động bọc {"type": "sensor_update"} cho Frontend)
     let _ = app_state.sensor_sender.send(sensor_data);
 }
 
@@ -154,41 +144,75 @@ async fn handle_device_status(device_id: String, payload: &[u8], app_state: web:
         device_id, status.online
     );
 
-    let ws_msg = json!({
-        "type": "device_status",
-        "device_id": device_id,
-        "online": status.online
-    });
+    // 🟢 SỬA THÀNH ALERT MESSAGE CHUẨN ĐỂ WS.RS XỬ LÝ KHÔNG BỊ LỖI TYPE
+    let alert = AlertMessage {
+        level: if status.online {
+            "success".to_string()
+        } else {
+            "warning".to_string()
+        },
+        title: "Trạng thái thiết bị".to_string(),
+        message: format!(
+            "Thiết bị {} vừa {}",
+            device_id,
+            if status.online {
+                "Trực tuyến"
+            } else {
+                "Mất kết nối"
+            }
+        ),
+        device_id: device_id.clone(),
+        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+    };
 
-    let _ = app_state.alert_sender.send(ws_msg.to_string());
+    let _ = app_state.alert_sender.send(alert);
 }
 
 async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
-    let fsm_data: FsmPayload = match serde_json::from_slice(payload) {
-        Ok(data) => data,
-        Err(e) => {
-            error!("Lỗi parse FsmPayload từ {}: {:?}", device_id, e);
-            return;
+    if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&payload) {
+        if let Some(state) = json["current_state"].as_str() {
+            let mut alert = None;
+
+            // 1. Phân tích loại lỗi
+            if state.starts_with("SystemFault:") {
+                let reason = state.replace("SystemFault:", "");
+                alert = Some(AlertMessage {
+                    level: "critical".to_string(),
+                    title: "Lỗi Hệ Thống!".to_string(),
+                    message: format!("Phát hiện lỗi phần cứng: {}. Vui lòng kiểm tra!", reason),
+                    device_id: device_id.clone(),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                });
+            } else if state == "EmergencyStop" {
+                alert = Some(AlertMessage {
+                    level: "critical".to_string(),
+                    title: "Dừng Khẩn Cấp!".to_string(),
+                    message: "Hệ thống đã bị ngắt khẩn cấp do vi phạm ngưỡng an toàn.".to_string(),
+                    device_id: device_id.clone(),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                });
+            }
+
+            // 2. Nếu có lỗi, xử lý 2 luồng: WebSocket (React) & FCM (Android)
+            if let Some(alert_msg) = alert {
+                // -> Gửi lên React App đang mở trên màn hình
+                let _ = app_state.alert_sender.send(alert_msg.clone());
+
+                // -> Gửi lên Firebase Cloud Messaging (Chạy nền không block MQTT)
+                let tokens = app_state.fcm_tokens.lock().unwrap().clone();
+                if !tokens.is_empty() {
+                    tokio::spawn(async move {
+                        crate::services::fcm::send_push_notification(
+                            &alert_msg.title,
+                            &alert_msg.message,
+                            tokens,
+                        )
+                        .await;
+                    });
+                }
+            }
         }
-    };
-
-    let new_state = fsm_data.current_state;
-    info!(
-        "ESP32 [{}] vừa chuyển sang trạng thái FSM: {}",
-        device_id, new_state
-    );
-
-    {
-        let mut states = app_state.device_states.write().await;
-        states.insert(device_id.clone(), new_state.clone());
     }
-
-    let ws_msg = json!({
-        "type": "fsm_update",
-        "device_id": device_id,
-        "current_state": new_state
-    });
-    let _ = app_state.alert_sender.send(ws_msg.to_string());
 }
 
 async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
@@ -220,16 +244,35 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
     {
         Ok(tx_id) => {
             info!("✅ Đã ghi lên Solana thành công! TxID: {}", tx_id);
-            let ws_msg = json!({
-                "type": "blockchain_verified",
-                "device_id": device_id,
-                "tx_id": tx_id,
-                "explorer_url": format!("https://solscan.io/tx/{}?cluster=devnet", tx_id)
-            });
-            let _ = app_state.alert_sender.send(ws_msg.to_string());
+
+            // 🟢 SỬA THÀNH ALERT MESSAGE ĐỂ BÁO VỀ UI REACT
+            let alert = AlertMessage {
+                level: "success".to_string(),
+                title: "Ghi Blockchain Thành Công".to_string(),
+                message: format!(
+                    "Mẻ phân bón đã được lưu trữ vĩnh viễn trên Solana.\nTxID: {}",
+                    tx_id
+                ),
+                device_id: device_id.clone(),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            };
+            let _ = app_state.alert_sender.send(alert);
         }
         Err(e) => {
             error!("❌ Lỗi ghi Blockchain cho {}: {:?}", device_id, e);
+
+            let alert = AlertMessage {
+                level: "warning".to_string(),
+                title: "Lỗi Ghi Blockchain".to_string(),
+                message: format!(
+                    "Mẻ phân bón hoàn tất nhưng không thể đồng bộ Solana. Lỗi: {:?}",
+                    e
+                ),
+                device_id: device_id.clone(),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            };
+            let _ = app_state.alert_sender.send(alert);
         }
     }
 }
+

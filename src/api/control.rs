@@ -62,29 +62,20 @@ pub async fn control_pump(
 
     // 🟢 Xử lý riêng cho CIRCULATION_PUMP qua Tuya Cloud
     // if req_data.pump == "CIRCULATION_PUMP" {
-    //     let turn_on = match req_data.action.as_str() {
-    //         "on" => true,
-    //         "off" => false,
-    //         _ => {
-    //             return HttpResponse::BadRequest()
-    //                 .json(json!({"error": "Circulation pump only supports on/off"}));
-    //         }
-    //     };
-    //
-    //     if let Err(e) = tuya::send_tuya_command(turn_on).await {
-    //         error!("Lỗi gửi lệnh Tuya: {:?}", e);
-    //         return HttpResponse::InternalServerError()
-    //             .json(json!({"error": format!("Tuya Error: {}", e)}));
-    //     }
-    //
-    //     info!("Đã gửi lệnh Tuya {} cho CIRCULATION_PUMP", req_data.action);
-    //     return HttpResponse::Ok()
-    //         .json(json!({"status": "success", "message": "Tuya command sent"}));
+    //     ... (Giữ nguyên code cũ của bạn)
     // }
 
-    // Xử lý các bơm khác qua MQTT
+    // 🟢 ĐỊNH TUYẾN LỆNH THÔNG MINH (SMART ROUTING)
+    // Nếu Frontend gửi action="on" nhưng có kèm theo giá trị PWM,
+    // Backend sẽ tự dịch thành "set_pwm" để ESP32 hiểu đúng ý đồ chỉnh tốc độ.
     let mqtt_action = match req_data.action.as_str() {
-        "on" => "pump_on",
+        "on" => {
+            if req_data.pwm.is_some() {
+                "set_pwm"
+            } else {
+                "pump_on"
+            }
+        }
         "off" => "pump_off",
         "reset_fault" => "reset_fault",
         "set_pwm" => "set_pwm",
@@ -104,9 +95,10 @@ pub async fn control_pump(
             .json(json!({"error": "Không thể gửi lệnh xuống thiết bị"}));
     }
 
+    // Nâng cấp Log để dễ theo dõi các lệnh Smart Dosing
     info!(
-        "Đã gửi lệnh {} (pwm: {:?}) cho {} trên thiết bị {} qua MQTT",
-        req_data.action, req_data.pwm, req_data.pump, device_id
+        "📡 Đã xuất lệnh MQTT [{}] -> Bơm: {} | PWM: {:?}% | Timeout: {:?}s | (Thiết bị: {})",
+        mqtt_action, req_data.pump, req_data.pwm, req_data.duration_sec, device_id
     );
 
     HttpResponse::Ok().json(json!({"status": "success", "message": "Command sent"}))
@@ -133,3 +125,4 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/api/devices/{device_id}/control").route("", web::post().to(control_pump)),
     );
 }
+

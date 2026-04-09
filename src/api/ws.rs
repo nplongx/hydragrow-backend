@@ -34,8 +34,16 @@ pub async fn ws_handler(
                 alert_result = alert_rx.recv() => {
                     match alert_result {
                         Ok(alert_msg) => {
-                            if let Ok(json_str) = serde_json::to_string(&alert_msg) && session.text(json_str).await.is_err() {
-                                break;
+                            // 🟢 Đóng gói JSON chuẩn cho Alert
+                            let ws_msg = serde_json::json!({
+                                "type": "alert",
+                                "payload": alert_msg
+                            });
+
+                            if let Ok(json_str) = serde_json::to_string(&ws_msg) {
+                                if session.text(json_str).await.is_err() {
+                                    break;
+                                }
                             }
                         }
                         Err(RecvError::Lagged(_)) => {
@@ -46,7 +54,6 @@ pub async fn ws_handler(
                         }
                     }
                 }
-
                 // Luồng nghe Sensor Data
                 sensor_result = sensor_rx.recv() => {
                     match sensor_result {

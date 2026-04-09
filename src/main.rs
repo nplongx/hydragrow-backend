@@ -5,13 +5,18 @@ use influxdb2::Client as InfluxClient; // 🟢 QUAY LẠI DÙNG INFLUXDB2
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde::Serialize;
 use sqlx::sqlite::SqlitePoolOptions;
-use std::{collections::HashMap, env, fs, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    env, fs,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::sync::{RwLock, broadcast};
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
 use crate::{
-    models::sensor::SensorData,
+    models::{alert::AlertMessage, sensor::SensorData},
     services::{scheduler::start_tuya_scheduler, solana::SolanaTraceability},
 };
 
@@ -20,16 +25,16 @@ pub mod db;
 pub mod models;
 pub mod mqtt;
 pub mod services;
-
-#[derive(Serialize)]
-pub struct AlertMessage {
-    pub alert_type: String,
-    pub device_id: String,
-    pub metric: String,
-    pub value: f64,
-    pub severity: String,
-    pub timestamp: String,
-}
+//
+// #[derive(Serialize)]
+// pub struct AlertMessage {
+//     pub alert_type: String,
+//     pub device_id: String,
+//     pub metric: String,
+//     pub value: f64,
+//     pub severity: String,
+//     pub timestamp: String,
+// }
 
 pub struct AppState {
     pub sqlite_pool: sqlx::SqlitePool,
@@ -37,10 +42,12 @@ pub struct AppState {
     pub influx_bucket: String,
     pub mqtt_client: AsyncClient,
     pub api_key: String,
-    pub alert_sender: broadcast::Sender<String>,
+    pub alert_sender: broadcast::Sender<AlertMessage>,
     pub device_states: std::sync::Arc<RwLock<HashMap<String, String>>>,
     pub solana_traceability: SolanaTraceability,
     pub sensor_sender: broadcast::Sender<SensorData>,
+
+    pub fcm_tokens: Mutex<Vec<String>>,
 }
 
 #[tokio::main]
@@ -116,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
         solana_traceability: solana_service,
         // 🟢 THÊM: Đưa kênh sensor vào AppState
         sensor_sender,
+        fcm_tokens: Mutex::new(Vec::new()),
     });
 
     mqtt_client
@@ -175,6 +183,7 @@ async fn main() -> anyhow::Result<()> {
             .configure(api::ws::init_routes)
             .configure(api::config::init_routes)
             .configure(api::solana::init_routes)
+            .configure(api::notification::init_routes)
     })
     .bind((server_host, server_port))?
     .run()

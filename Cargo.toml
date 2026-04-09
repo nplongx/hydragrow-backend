@@ -57,3 +57,5 @@ solana-client = "2.0.9"
 solana-sdk = "2.0.9"
 influxdb2 = "0.5.2"
 influxdb2-structmap = "0.2.0"
+
+yup-oauth2 = "8.3"
