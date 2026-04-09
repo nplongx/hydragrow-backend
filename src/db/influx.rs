@@ -42,7 +42,9 @@ pub async fn get_latest_sensor_data(
         |> range(start: -24h)
         |> filter(fn: (r) => r["_measurement"] == "sensor_data")
         |> filter(fn: (r) => r.device_id == "{}")
-        |> last()
+        |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+        |> sort(columns: ["_time"], desc: true)
+        |> limit(n: 1)
         "#,
         bucket, device_id
     );
@@ -63,4 +65,3 @@ pub async fn get_latest_sensor_data(
         device_id
     ))
 }
-

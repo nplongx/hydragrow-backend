@@ -89,4 +89,3 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route("/history", web::get().to(get_history)),
     );
 }
-

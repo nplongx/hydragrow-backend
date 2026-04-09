@@ -149,4 +149,3 @@ pub async fn send_tuya_command(turn_on: bool) -> Result<()> {
         Err(anyhow!("Gửi lệnh Tuya thất bại"))
     }
 }
-
