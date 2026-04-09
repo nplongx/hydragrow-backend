@@ -1,4 +1,5 @@
 use actix_web::web;
+use chrono::DateTime;
 use rumqttc::Publish;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -31,15 +32,23 @@ struct FsmPayload {
     pub current_state: String,
 }
 
-// 🟢 ĐÃ SỬA: Bổ sung pump_status vào struct trung gian
 #[derive(Debug, Deserialize)]
 pub struct IncomingSensorPayload {
+    #[serde(rename = "temp_value")]
     pub temp: Option<f64>,
+
+    #[serde(rename = "ec_value")]
     pub ec: Option<f64>,
+
+    #[serde(rename = "ph_value")]
     pub ph: Option<f64>,
+
     pub water_level: Option<f64>,
+
+    // 🟢 ĐÃ SỬA: Đổi lại thành timestamp_ms và kiểu u64 để khớp 100% với ESP32
     pub timestamp_ms: Option<u64>,
-    pub pump_status: Option<PumpStatus>, // Hứng trạng thái bơm từ ESP32
+
+    pub pump_status: Option<PumpStatus>,
 }
 
 #[instrument(skip(app_state, publish))]
@@ -76,7 +85,6 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
 }
 
 async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
-    // 1. Parse JSON khuyết bằng IncomingSensorPayload
     let incoming: IncomingSensorPayload = match serde_json::from_slice(payload) {
         Ok(data) => data,
         Err(e) => {
@@ -88,57 +96,48 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         }
     };
 
-    let current_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
+    // 🟢 ĐÃ SỬA: Convert từ số millis (u64) sang chuỗi ISO 8601
+    let time = incoming
+        .timestamp_ms
+        .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms as i64))
+        .unwrap_or_else(|| chrono::Utc::now())
+        .to_rfc3339();
 
+    // Khởi tạo struct SensorData chuẩn của toàn hệ thống
     let sensor_data = SensorData {
         device_id: device_id.clone(),
         temp_value: incoming.temp.unwrap_or(0.0),
         ec_value: incoming.ec.unwrap_or(0.0),
         ph_value: incoming.ph.unwrap_or(0.0),
         water_level: incoming.water_level.unwrap_or(0.0),
-        pump_status: incoming.pump_status.unwrap_or_default(), // Lấy trạng thái bơm, nếu không có thì mặc định false
-        timestamp: incoming
-            .timestamp_ms
-            .unwrap_or(current_ms as u64)
-            .to_string(),
+        pump_status: incoming.pump_status.unwrap_or_default(),
+        time,
     };
 
-    // 🟢 ĐÃ SỬA: unwrap_or(0) thành unwrap_or(0.0) để đúng kiểu float (f32)
     debug!(
         "Nhận dữ liệu cảm biến từ {}: ph={:.2}, ec={:.2}",
-        device_id,
-        incoming.ph.unwrap_or(0.0),
-        incoming.ec.unwrap_or(0.0)
+        device_id, sensor_data.ph_value, sensor_data.ec_value
     );
 
-    // 3. Ghi dữ liệu vào InfluxDB
+    // Ghi dữ liệu vào InfluxDB
     if let Err(e) = write_sensor_data(
         &app_state.influx_client,
         &app_state.influx_bucket,
-        &sensor_data, // Truyền struct chuẩn vào DB Influx
+        &sensor_data,
     )
     .await
     {
         error!("Lỗi lưu SensorData vào InfluxDB ({}): {:?}", device_id, e);
     }
 
-    // 4. 🟢 ĐÃ SỬA: Bắn cả pump_status qua WebSocket cho Frontend
+    // 🟢 ĐÃ SỬA: Đóng gói JSON chuẩn cấu trúc cho Tauri
+    // Dùng key "payload" và ném nguyên cục sensor_data vào để Tauri mapping vào struct SensorData
     let ws_msg = json!({
         "type": "sensor_update",
-        "device_id": device_id,
-        "data": {
-            "temp": incoming.temp,
-            "ec": incoming.ec,
-            "ph": incoming.ph,
-            "water_level": incoming.water_level,
-            "pump_status": sensor_data.pump_status // Frontend sẽ dùng cái này để sáng/tắt đèn báo bơm
-        }
+        "payload": sensor_data
     });
 
-    let _ = app_state.alert_sender.send(ws_msg.to_string());
+    let _ = app_state.sensor_sender.send(sensor_data);
 }
 
 async fn handle_device_status(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {

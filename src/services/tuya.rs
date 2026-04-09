@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use reqwest::{
-    Client, Method,
+    Client,
     header::{HeaderMap, HeaderValue},
 };
 use serde::Deserialize;
@@ -74,10 +74,10 @@ async fn get_tuya_token(client: &Client, client_id: &str, secret: &str) -> Resul
         .json()
         .await?;
 
-    if resp.success
-        && let Some(res) = resp.result
-    {
-        return Ok(res.access_token);
+    if resp.success {
+        if let Some(res) = resp.result {
+            return Ok(res.access_token);
+        }
     }
 
     Err(anyhow!("Lỗi lấy Token Tuya: {:?}", resp.msg))
@@ -96,6 +96,8 @@ pub async fn send_tuya_command(turn_on: bool) -> Result<()> {
 
     let client = Client::new();
 
+    // 💡 Pro-tip: Trong tương lai bạn có thể cache lại access_token này
+    // vì nó có hiệu lực tới 2 tiếng, lấy mới liên tục sẽ tốn thời gian API
     let access_token = get_tuya_token(&client, &client_id, &secret).await?;
 
     let url_path = format!("/v1.0/iot-03/devices/{}/commands", device_id);
@@ -136,12 +138,15 @@ pub async fn send_tuya_command(turn_on: bool) -> Result<()> {
         .body(body_str)
         .send()
         .await?;
+
     let resp_text = resp.text().await?;
 
     if resp_text.contains("\"success\":true") {
+        info!("✅ Đã bật/tắt ổ cắm Tuya thành công: {}", turn_on);
         Ok(())
     } else {
-        error!("Tuya API trả về lỗi: {}", resp_text);
+        error!("❌ Tuya API trả về lỗi: {}", resp_text);
         Err(anyhow!("Gửi lệnh Tuya thất bại"))
     }
 }
+

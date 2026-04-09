@@ -15,6 +15,8 @@ pub async fn ws_handler(
     let (response, mut session, mut msg_stream) = actix_ws::handle(&req, body)?;
 
     let mut alert_rx = app_state.alert_sender.subscribe();
+    let mut sensor_rx = app_state.sensor_sender.subscribe();
+
     let client_ip = req
         .connection_info()
         .realip_remote_addr()
@@ -42,6 +44,27 @@ pub async fn ws_handler(
                         Err(RecvError::Closed) => {
                             break;
                         }
+                    }
+                }
+
+                // Luồng nghe Sensor Data
+                sensor_result = sensor_rx.recv() => {
+                    match sensor_result {
+                        Ok(sensor_data) => {
+                            // Gói đúng chuẩn cho Tauri
+                            let ws_msg = serde_json::json!({
+                                "type": "sensor_update",
+                                "payload": sensor_data
+                            });
+
+                            // Gửi đi 1 lần duy nhất
+                            if let Ok(json_str) = serde_json::to_string(&ws_msg) {
+                                if session.text(json_str).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        Err(_) => break,
                     }
                 }
 

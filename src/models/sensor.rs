@@ -1,9 +1,10 @@
+use std::str::FromStr;
+
+use chrono::{DateTime, FixedOffset};
 use influxdb2::FromDataPoint;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-// Bạn có thể xóa DeviceState nếu không còn nơi nào trong Frontend/Backend dùng đến nó.
-// Mình tạm giữ lại để tránh lỗi compile ở các file khác (nếu có).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceState {
@@ -45,12 +46,11 @@ pub struct SensorData {
 
     #[serde(default)]
     pub pump_status: PumpStatus,
-
-    #[serde(default)]
-    pub timestamp: String,
+    // #[serde(default)]
+    // pub timestamp: String,
+    pub time: String,
 }
 
-/// Cấu trúc trung gian để lưu/đọc từ InfluxDB (Vì InfluxDB không lưu trực tiếp struct lồng nhau)
 #[derive(Debug, Clone, Serialize, Deserialize, FromDataPoint, Default)]
 pub struct SensorDataRow {
     pub device_id: String,
@@ -59,7 +59,9 @@ pub struct SensorDataRow {
     pub temp_value: f64,
     pub water_level: f64,
     pub pump_status: String,
-    pub _time: String,
+
+    // ĐÃ SỬA: Bỏ serde rename, đổi String thành DateTime<FixedOffset>
+    pub time: DateTime<FixedOffset>,
 }
 
 impl From<SensorDataRow> for SensorData {
@@ -72,12 +74,14 @@ impl From<SensorDataRow> for SensorData {
             temp_value: row.temp_value,
             water_level: row.water_level,
             pump_status,
-            timestamp: row._time,
+
+            // ĐÃ SỬA: Format thời gian về lại String chuẩn RFC3339 cho Client
+            time: row.time.to_rfc3339(),
         }
     }
 }
 
-/// Request điều khiển Bơm từ Frontend (Nếu bạn còn dùng struct này ở đâu đó)
+/// Request điều khiển Bơm từ Frontend
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct PumpCommandReq {
     #[validate(length(min = 1))]
@@ -86,4 +90,3 @@ pub struct PumpCommandReq {
     // ĐÃ SỬA: Chuyển sang String để có thể truyền lệnh "reset_fault" bên cạnh "on" / "off"
     pub action: String,
 }
-

@@ -9,7 +9,7 @@ pub enum DbError {
     SqliteError(#[from] sqlx::Error),
 
     #[error("InfluxDB operation failed: {0}")]
-    InfluxError(#[from] influxdb2::RequestError),
+    InfluxError(#[from] influxdb2::BuildError),
 
     #[error("Record not found for device: {0}")]
     NotFound(String),

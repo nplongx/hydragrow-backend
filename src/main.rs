@@ -10,7 +10,10 @@ use tokio::sync::{RwLock, broadcast};
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
-use crate::services::{scheduler::start_tuya_scheduler, solana::SolanaTraceability};
+use crate::{
+    models::sensor::SensorData,
+    services::{scheduler::start_tuya_scheduler, solana::SolanaTraceability},
+};
 
 pub mod api;
 pub mod db;
@@ -37,6 +40,7 @@ pub struct AppState {
     pub alert_sender: broadcast::Sender<String>,
     pub device_states: std::sync::Arc<RwLock<HashMap<String, String>>>,
     pub solana_traceability: SolanaTraceability,
+    pub sensor_sender: broadcast::Sender<SensorData>,
 }
 
 #[tokio::main]
@@ -82,6 +86,9 @@ async fn main() -> anyhow::Result<()> {
     let private_key: Vec<u8> = serde_json::from_str(&wallet_data).unwrap();
     let solana_service = SolanaTraceability::new("https://api.devnet.solana.com", &private_key);
     let (alert_sender, _) = broadcast::channel(100);
+    // 🟢 THÊM: Khởi tạo kênh truyền dữ liệu Sensor
+    let (sensor_sender, _) = broadcast::channel(100);
+
     let api_key = std::env::var("API_KEY").context("API_KEY must be set in .env")?;
     let device_states = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
@@ -94,6 +101,8 @@ async fn main() -> anyhow::Result<()> {
         api_key,
         device_states,
         solana_traceability: solana_service,
+        // 🟢 THÊM: Đưa kênh sensor vào AppState
+        sensor_sender,
     });
 
     mqtt_client

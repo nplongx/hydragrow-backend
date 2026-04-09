@@ -139,4 +139,3 @@ pub fn check_alerts(sensor: &SensorData, safety: &SafetyConfig) -> Vec<AlertMess
 
     alerts
 }
-
