@@ -44,7 +44,7 @@ pub async fn control_pump(
         "MIST_VALVE",
         "WATER_PUMP",
         "DRAIN_PUMP",
-        "CIRCULATION_PUMP", // 🟢 Bơm tuần hoàn điều khiển qua Tuya
+        // "CIRCULATION_PUMP", // 🟢 Bơm tuần hoàn điều khiển qua Tuya
         "ALL",
     ];
 
@@ -61,26 +61,26 @@ pub async fn control_pump(
     }
 
     // 🟢 Xử lý riêng cho CIRCULATION_PUMP qua Tuya Cloud
-    if req_data.pump == "CIRCULATION_PUMP" {
-        let turn_on = match req_data.action.as_str() {
-            "on" => true,
-            "off" => false,
-            _ => {
-                return HttpResponse::BadRequest()
-                    .json(json!({"error": "Circulation pump only supports on/off"}));
-            }
-        };
-
-        if let Err(e) = tuya::send_tuya_command(turn_on).await {
-            error!("Lỗi gửi lệnh Tuya: {:?}", e);
-            return HttpResponse::InternalServerError()
-                .json(json!({"error": format!("Tuya Error: {}", e)}));
-        }
-
-        info!("Đã gửi lệnh Tuya {} cho CIRCULATION_PUMP", req_data.action);
-        return HttpResponse::Ok()
-            .json(json!({"status": "success", "message": "Tuya command sent"}));
-    }
+    // if req_data.pump == "CIRCULATION_PUMP" {
+    //     let turn_on = match req_data.action.as_str() {
+    //         "on" => true,
+    //         "off" => false,
+    //         _ => {
+    //             return HttpResponse::BadRequest()
+    //                 .json(json!({"error": "Circulation pump only supports on/off"}));
+    //         }
+    //     };
+    //
+    //     if let Err(e) = tuya::send_tuya_command(turn_on).await {
+    //         error!("Lỗi gửi lệnh Tuya: {:?}", e);
+    //         return HttpResponse::InternalServerError()
+    //             .json(json!({"error": format!("Tuya Error: {}", e)}));
+    //     }
+    //
+    //     info!("Đã gửi lệnh Tuya {} cho CIRCULATION_PUMP", req_data.action);
+    //     return HttpResponse::Ok()
+    //         .json(json!({"status": "success", "message": "Tuya command sent"}));
+    // }
 
     // Xử lý các bơm khác qua MQTT
     let mqtt_action = match req_data.action.as_str() {
@@ -133,4 +133,3 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/api/devices/{device_id}/control").route("", web::post().to(control_pump)),
     );
 }
-
