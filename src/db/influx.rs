@@ -63,3 +63,4 @@ pub async fn get_latest_sensor_data(
         device_id
     ))
 }
+

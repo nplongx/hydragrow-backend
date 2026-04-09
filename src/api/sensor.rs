@@ -53,6 +53,7 @@ pub async fn get_history(
         |> range(start: -{}) 
         |> filter(fn: (r) => r["_measurement"] == "sensor_data")
         |> filter(fn: (r) => r.device_id == "{}")
+        |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> sort(columns: ["_time"], desc: true)
         |> limit(n: 100)
         "#,
@@ -88,3 +89,4 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route("/history", web::get().to(get_history)),
     );
 }
+
