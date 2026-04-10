@@ -219,4 +219,3 @@ pub async fn get_device_blockchain_history(
 
     Ok(history)
 }
-

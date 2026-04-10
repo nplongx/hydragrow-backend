@@ -99,8 +99,8 @@ async fn fetch_controller_node_config(
         scheduled_water_change_enabled: w_cfg.scheduled_water_change_enabled == 1,
         water_change_interval_sec: w_cfg.water_change_interval_sec,
         scheduled_drain_amount_cm: w_cfg.scheduled_drain_amount_cm,
-        misting_on_duration_ms: w_cfg.misting_on_duration_ms,     // 🟢 Bổ sung
-        misting_off_duration_ms: w_cfg.misting_off_duration_ms,   // 🟢 Bổ sung
+        misting_on_duration_ms: w_cfg.misting_on_duration_ms, // 🟢 Bổ sung
+        misting_off_duration_ms: w_cfg.misting_off_duration_ms, // 🟢 Bổ sung
 
         emergency_shutdown: s_cfg.emergency_shutdown == 1,
         max_ec_limit: s_cfg.max_ec_limit,
@@ -113,8 +113,8 @@ async fn fetch_controller_node_config(
         water_level_critical_min: s_cfg.water_level_critical_min,
         max_refill_duration_sec: s_cfg.max_refill_duration_sec,
         max_drain_duration_sec: s_cfg.max_drain_duration_sec,
-        ec_ack_threshold: s_cfg.ec_ack_threshold,       // 🟢 Bổ sung
-        ph_ack_threshold: s_cfg.ph_ack_threshold,       // 🟢 Bổ sung
+        ec_ack_threshold: s_cfg.ec_ack_threshold, // 🟢 Bổ sung
+        ph_ack_threshold: s_cfg.ph_ack_threshold, // 🟢 Bổ sung
         water_ack_threshold: s_cfg.water_ack_threshold, // 🟢 Bổ sung
 
         ec_gain_per_ml: d_cfg.ec_gain_per_ml,
@@ -337,15 +337,28 @@ pub async fn update_water_config(
             misting_off_duration_ms = excluded.misting_off_duration_ms,   -- 🟢
             last_updated = excluded.last_updated
         "#,
-        device_id, config.water_level_min, config.water_level_target, config.water_level_max,
-        config.water_level_drain, config.circulation_mode, config.circulation_on_sec,
-        config.circulation_off_sec, config.water_level_tolerance, config.auto_refill_enabled,
-        config.auto_drain_overflow, config.auto_dilute_enabled, config.dilute_drain_amount_cm,
-        config.scheduled_water_change_enabled, config.water_change_interval_sec,
-        config.scheduled_drain_amount_cm, 
-        config.misting_on_duration_ms, config.misting_off_duration_ms, // 🟢 Binding mới
+        device_id,
+        config.water_level_min,
+        config.water_level_target,
+        config.water_level_max,
+        config.water_level_drain,
+        config.circulation_mode,
+        config.circulation_on_sec,
+        config.circulation_off_sec,
+        config.water_level_tolerance,
+        config.auto_refill_enabled,
+        config.auto_drain_overflow,
+        config.auto_dilute_enabled,
+        config.dilute_drain_amount_cm,
+        config.scheduled_water_change_enabled,
+        config.water_change_interval_sec,
+        config.scheduled_drain_amount_cm,
+        config.misting_on_duration_ms,
+        config.misting_off_duration_ms, // 🟢 Binding mới
         now
-    ).execute(&app_state.sqlite_pool).await;
+    )
+    .execute(&app_state.sqlite_pool)
+    .await;
 
     match result {
         Ok(_) => {
@@ -422,7 +435,7 @@ pub async fn update_safety_config(
         config.max_ec_delta, config.max_ph_delta, config.max_dose_per_cycle, config.cooldown_sec,
         config.max_dose_per_hour, config.water_level_critical_min, config.max_refill_cycles_per_hour,
         config.max_drain_cycles_per_hour, config.max_refill_duration_sec, config.max_drain_duration_sec,
-        config.max_temp_limit, config.min_temp_limit, config.emergency_shutdown, 
+        config.max_temp_limit, config.min_temp_limit, config.emergency_shutdown,
         config.ec_ack_threshold, config.ph_ack_threshold, config.water_ack_threshold, // 🟢 Binding mới
         now
     ).execute(&app_state.sqlite_pool).await;
@@ -581,7 +594,7 @@ pub async fn update_dosing_calibration(
         "#,
         device_id, cal.tank_volume_l, cal.ec_gain_per_ml, cal.ph_shift_up_per_ml,
         cal.ph_shift_down_per_ml, cal.active_mixing_sec, cal.sensor_stabilize_sec, cal.ec_step_ratio,
-        cal.ph_step_ratio, cal.dosing_pump_capacity_ml_per_sec, 
+        cal.ph_step_ratio, cal.dosing_pump_capacity_ml_per_sec,
         cal.soft_start_duration, // 🟢 Binding mới
         now
     ).execute(&app_state.sqlite_pool).await;

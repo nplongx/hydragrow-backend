@@ -275,4 +275,3 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
         }
     }
 }
-

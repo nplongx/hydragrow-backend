@@ -109,4 +109,3 @@ pub async fn start_tuya_scheduler(app_state: web::Data<AppState>, target_device_
         }
     });
 }
-

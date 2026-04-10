@@ -31,15 +31,17 @@ pub async fn ws_handler(
     actix_web::rt::spawn(async move {
         loop {
             tokio::select! {
+                // 🟢 LUỒNG NGHE CÁC BẢN TIN TỔNG HỢP (Status, Alert, FSM, Blockchain)
                 alert_result = alert_rx.recv() => {
                     match alert_result {
                         Ok(alert_msg) => {
-                            // 🟢 Đóng gói JSON chuẩn cho Alert
+                            // 1. Đóng gói Struct thành định dạng JSON có chứa "type"
                             let ws_msg = serde_json::json!({
                                 "type": "alert",
                                 "payload": alert_msg
                             });
 
+                            // 2. Chuyển JSON thành chuỗi String (Serialize) rồi mới gửi đi
                             if let Ok(json_str) = serde_json::to_string(&ws_msg) {
                                 if session.text(json_str).await.is_err() {
                                     break;
@@ -54,17 +56,17 @@ pub async fn ws_handler(
                         }
                     }
                 }
-                // Luồng nghe Sensor Data
+
+                // 🟢 LUỒNG NGHE SENSOR DATA
                 sensor_result = sensor_rx.recv() => {
                     match sensor_result {
                         Ok(sensor_data) => {
-                            // Gói đúng chuẩn cho Tauri
+                            // Cảm biến thì vẫn cần bọc lại do app_state.sensor_sender truyền struct thuần
                             let ws_msg = serde_json::json!({
                                 "type": "sensor_update",
                                 "payload": sensor_data
                             });
 
-                            // Gửi đi 1 lần duy nhất
                             if let Ok(json_str) = serde_json::to_string(&ws_msg) {
                                 if session.text(json_str).await.is_err() {
                                     break;
@@ -75,6 +77,7 @@ pub async fn ws_handler(
                     }
                 }
 
+                // 🟢 LUỒNG XỬ LÝ CÁC EVENT WEBSOCKET KHÁC
                 Some(Ok(msg)) = msg_stream.next() => {
                     match msg {
                         Message::Ping(bytes) => {

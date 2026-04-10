@@ -125,4 +125,3 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/api/devices/{device_id}/control").route("", web::post().to(control_pump)),
     );
 }
-
