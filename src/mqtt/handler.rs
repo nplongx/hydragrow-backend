@@ -71,8 +71,26 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
         "status" => {
             handle_device_status(device_id, &payload_bytes, app_state).await;
         }
+        // Tìm đến nhánh xử lý FSM topic (ví dụ: AGITECH/+/fsm)
         "fsm" => {
-            handle_fsm_state(device_id, &payload_bytes, app_state).await;
+            // 🟢 1. IN RA RAW DATA NGAY LẬP TỨC ĐỂ XEM CÓ NHẬN ĐƯỢC CHƯA
+            let raw_payload = std::str::from_utf8(&payload).unwrap_or("Lỗi UTF-8");
+            println!("📥 [MQTT-FSM] Đã nhận gói tin RAW: {}", raw_payload);
+
+            // 🟢 2. BẮT LỖI PARSE JSON CHỨ KHÔNG ĐƯỢC IM LẶNG
+            match serde_json::from_str::<FsmPayload>(raw_payload) {
+                Ok(fsm_data) => {
+                    println!("✅ Đã parse JSON thành công: {:?}", fsm_data);
+                    // ... Logic xử lý if EmergencyStop của bạn nằm ở đây
+                }
+                Err(e) => {
+                    // NẾU THIẾU DÒNG NÀY, APP SẼ IM RU KHI GỬI SAI JSON!
+                    eprintln!(
+                        "❌ [MQTT-FSM] Lỗi không thể đọc JSON: {}. Gói tin bị từ chối!",
+                        e
+                    );
+                }
+            }
         }
         "dosing_report" => {
             handle_dosing_report(device_id, &payload_bytes, app_state).await;
