@@ -71,26 +71,8 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
         "status" => {
             handle_device_status(device_id, &payload_bytes, app_state).await;
         }
-        // Tìm đến nhánh xử lý FSM topic (ví dụ: AGITECH/+/fsm)
         "fsm" => {
-            // 🟢 1. IN RA RAW DATA NGAY LẬP TỨC ĐỂ XEM CÓ NHẬN ĐƯỢC CHƯA
-            let raw_payload = std::str::from_utf8(&payload).unwrap_or("Lỗi UTF-8");
-            println!("📥 [MQTT-FSM] Đã nhận gói tin RAW: {}", raw_payload);
-
-            // 🟢 2. BẮT LỖI PARSE JSON CHỨ KHÔNG ĐƯỢC IM LẶNG
-            match serde_json::from_str::<FsmPayload>(raw_payload) {
-                Ok(fsm_data) => {
-                    println!("✅ Đã parse JSON thành công: {:?}", fsm_data);
-                    // ... Logic xử lý if EmergencyStop của bạn nằm ở đây
-                }
-                Err(e) => {
-                    // NẾU THIẾU DÒNG NÀY, APP SẼ IM RU KHI GỬI SAI JSON!
-                    eprintln!(
-                        "❌ [MQTT-FSM] Lỗi không thể đọc JSON: {}. Gói tin bị từ chối!",
-                        e
-                    );
-                }
-            }
+            handle_fsm_state(device_id, &payload_bytes, app_state).await;
         }
         "dosing_report" => {
             handle_dosing_report(device_id, &payload_bytes, app_state).await;
@@ -187,48 +169,71 @@ async fn handle_device_status(device_id: String, payload: &[u8], app_state: web:
 }
 
 async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
-    if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&payload) {
-        if let Some(state) = json["current_state"].as_str() {
-            let mut alert = None;
+    // 🟢 1. In ra RAW DATA ngay lập tức để chắc chắn Backend đã nhận được tin nhắn
+    let raw_payload = std::str::from_utf8(payload).unwrap_or("Lỗi UTF-8");
+    info!("📥 [MQTT-FSM] {} gửi gói tin: {}", device_id, raw_payload);
 
-            // 1. Phân tích loại lỗi
-            if state.starts_with("SystemFault:") {
-                let reason = state.replace("SystemFault:", "");
-                alert = Some(AlertMessage {
-                    level: "critical".to_string(),
-                    title: "Lỗi Hệ Thống!".to_string(),
-                    message: format!("Phát hiện lỗi phần cứng: {}. Vui lòng kiểm tra!", reason),
-                    device_id: device_id.clone(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                });
-            } else if state == "EmergencyStop" {
-                alert = Some(AlertMessage {
-                    level: "critical".to_string(),
-                    title: "Dừng Khẩn Cấp!".to_string(),
-                    message: "Hệ thống đã bị ngắt khẩn cấp do vi phạm ngưỡng an toàn.".to_string(),
-                    device_id: device_id.clone(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                });
-            }
+    // 🟢 2. Bắt lỗi Parse JSON rõ ràng (Không dùng if let nữa)
+    match serde_json::from_slice::<serde_json::Value>(payload) {
+        Ok(json) => {
+            // 🟢 3. Kiểm tra xem có trường "current_state" không
+            if let Some(state) = json["current_state"].as_str() {
+                let mut alert = None;
 
-            // 2. Nếu có lỗi, xử lý 2 luồng: WebSocket (React) & FCM (Android)
-            if let Some(alert_msg) = alert {
-                // -> Gửi lên React App đang mở trên màn hình
-                let _ = app_state.alert_sender.send(alert_msg.clone());
-
-                // -> Gửi lên Firebase Cloud Messaging (Chạy nền không block MQTT)
-                let tokens = app_state.fcm_tokens.lock().unwrap().clone();
-                if !tokens.is_empty() {
-                    tokio::spawn(async move {
-                        crate::services::fcm::send_push_notification(
-                            &alert_msg.title,
-                            &alert_msg.message,
-                            tokens,
-                        )
-                        .await;
+                // Phân tích loại lỗi
+                if state.starts_with("SystemFault:") {
+                    let reason = state.replace("SystemFault:", "");
+                    alert = Some(AlertMessage {
+                        level: "critical".to_string(),
+                        title: "Lỗi Hệ Thống!".to_string(),
+                        message: format!("Phát hiện lỗi phần cứng: {}. Vui lòng kiểm tra!", reason),
+                        device_id: device_id.clone(),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     });
+                } else if state == "EmergencyStop" {
+                    alert = Some(AlertMessage {
+                        level: "critical".to_string(),
+                        title: "Dừng Khẩn Cấp!".to_string(),
+                        message: "Hệ thống đã bị ngắt khẩn cấp do vi phạm ngưỡng an toàn."
+                            .to_string(),
+                        device_id: device_id.clone(),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    });
+                } else {
+                    // Nếu là trạng thái bình thường (Idle, Dosing...), in log nhẹ nhàng
+                    debug!("Trạng thái FSM bình thường: {}", state);
                 }
+
+                // Nếu có cảnh báo, xử lý 2 luồng: WebSocket (React) & FCM (Android)
+                if let Some(alert_msg) = alert {
+                    info!("🚨 KÍCH HOẠT BÁO ĐỘNG: {}", alert_msg.title);
+
+                    // -> Gửi lên React App đang mở trên màn hình
+                    let _ = app_state.alert_sender.send(alert_msg.clone());
+
+                    // -> Gửi lên Firebase Cloud Messaging
+                    let tokens = app_state.fcm_tokens.lock().unwrap().clone();
+                    if tokens.is_empty() {
+                        warn!(
+                            "⚠️ Không có FCM Token nào trong RAM! Không thể gửi Push Notification tới điện thoại."
+                        );
+                    } else {
+                        tokio::spawn(async move {
+                            crate::services::fcm::send_push_notification(
+                                &alert_msg.title,
+                                &alert_msg.message,
+                                tokens,
+                            )
+                            .await;
+                        });
+                    }
+                }
+            } else {
+                error!("❌ [MQTT-FSM] JSON hợp lệ nhưng bị thiếu trường 'current_state'!");
             }
+        }
+        Err(e) => {
+            error!("❌ [MQTT-FSM] Cấu trúc JSON bị sai định dạng: {:?}", e);
         }
     }
 }
