@@ -54,15 +54,51 @@
         "type_info": "Float"
       },
       {
-        "name": "last_calibrated",
+        "name": "soft_start_duration",
         "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "scheduled_mixing_interval_sec",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "scheduled_mixing_duration_sec",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_calibrated",
+        "ordinal": 13,
         "type_info": "Text"
+      },
+      {
+        "name": "dosing_pwm_percent",
+        "ordinal": 14,
+        "type_info": "Integer"
+      },
+      {
+        "name": "osaka_mixing_pwm_percent",
+        "ordinal": 15,
+        "type_info": "Integer"
+      },
+      {
+        "name": "osaka_misting_pwm_percent",
+        "ordinal": 16,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
       "Right": 1
     },
     "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
       false,
       false,
       false,

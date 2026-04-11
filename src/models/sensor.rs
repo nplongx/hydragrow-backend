@@ -81,12 +81,17 @@ impl From<SensorDataRow> for SensorData {
     }
 }
 
-/// Request điều khiển Bơm từ Frontend
+// Trong src/models/sensor.rs (Backend)
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct PumpCommandReq {
     #[validate(length(min = 1))]
-    pub pump_id: String, // "A", "B", "PH_UP", "WATER_PUMP", "ALL", v.v.
+    #[serde(rename = "pump")]
+    // SỬA Ở ĐÂY: Giao tiếp với FE/MQTT bằng key "pump" thay vì "pump_id"
+    pub pump_id: String,
 
-    // ĐÃ SỬA: Chuyển sang String để có thể truyền lệnh "reset_fault" bên cạnh "on" / "off"
     pub action: String,
+
+    // NÊN BỔ SUNG: Khớp với MqttCommandPayload của ESP32 để hỗ trợ Set PWM và Auto Timeout
+    pub duration_sec: Option<u64>,
+    pub pwm: Option<u32>,
 }

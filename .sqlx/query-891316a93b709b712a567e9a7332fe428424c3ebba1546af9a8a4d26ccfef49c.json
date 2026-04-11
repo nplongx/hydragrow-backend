@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT \n            device_id, max_ec_limit, min_ec_limit, min_ph_limit, max_ph_limit, max_ec_delta, max_ph_delta,\n            max_dose_per_cycle, cooldown_sec, max_dose_per_hour, water_level_critical_min,\n            max_refill_cycles_per_hour, max_drain_cycles_per_hour, max_refill_duration_sec,\n            max_drain_duration_sec, min_temp_limit, max_temp_limit, emergency_shutdown, last_updated\n        FROM safety_config \n        WHERE device_id = ?\n        ",
+  "query": "\n        SELECT\n            device_id,\n            max_ec_limit,\n            min_ec_limit,\n            min_ph_limit,\n            max_ph_limit,\n            max_ec_delta,\n            max_ph_delta,\n            max_dose_per_cycle,\n            cooldown_sec,\n            max_dose_per_hour,\n            water_level_critical_min,\n            max_refill_cycles_per_hour,\n            max_drain_cycles_per_hour,\n            max_refill_duration_sec,\n            max_drain_duration_sec,\n            min_temp_limit,\n            max_temp_limit,\n            emergency_shutdown,\n            ec_ack_threshold,     -- 🟢 Trường mới\n            ph_ack_threshold,     -- 🟢 Trường mới\n            water_ack_threshold,  -- 🟢 Trường mới\n            last_updated\n        FROM safety_config\n        WHERE device_id = ?\n        ",
   "describe": {
     "columns": [
       {
@@ -94,8 +94,23 @@
         "type_info": "Integer"
       },
       {
-        "name": "last_updated",
+        "name": "ec_ack_threshold",
         "ordinal": 18,
+        "type_info": "Float"
+      },
+      {
+        "name": "ph_ack_threshold",
+        "ordinal": 19,
+        "type_info": "Float"
+      },
+      {
+        "name": "water_ack_threshold",
+        "ordinal": 20,
+        "type_info": "Float"
+      },
+      {
+        "name": "last_updated",
+        "ordinal": 21,
         "type_info": "Text"
       }
     ],
@@ -121,8 +136,11 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "d868aac25b87e76c5143de24e076028799ce96c5c63b507f7a035fe8c85cfd9d"
+  "hash": "891316a93b709b712a567e9a7332fe428424c3ebba1546af9a8a4d26ccfef49c"
 }

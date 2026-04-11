@@ -52,12 +52,30 @@
         "name": "last_updated",
         "ordinal": 9,
         "type_info": "Text"
+      },
+      {
+        "name": "pump_a_capacity_ml_per_sec",
+        "ordinal": 10,
+        "type_info": "Float"
+      },
+      {
+        "name": "pump_b_capacity_ml_per_sec",
+        "ordinal": 11,
+        "type_info": "Float"
+      },
+      {
+        "name": "delay_between_a_and_b_sec",
+        "ordinal": 12,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
       "Right": 1
     },
     "nullable": [
+      false,
+      false,
+      false,
       false,
       false,
       false,

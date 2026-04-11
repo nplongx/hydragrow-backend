@@ -94,8 +94,23 @@
         "type_info": "Integer"
       },
       {
-        "name": "last_updated",
+        "name": "ec_ack_threshold",
         "ordinal": 18,
+        "type_info": "Float"
+      },
+      {
+        "name": "ph_ack_threshold",
+        "ordinal": 19,
+        "type_info": "Float"
+      },
+      {
+        "name": "water_ack_threshold",
+        "ordinal": 20,
+        "type_info": "Float"
+      },
+      {
+        "name": "last_updated",
+        "ordinal": 21,
         "type_info": "Text"
       }
     ],
@@ -103,6 +118,9 @@
       "Right": 1
     },
     "nullable": [
+      false,
+      false,
+      false,
       false,
       false,
       false,

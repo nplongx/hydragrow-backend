@@ -69,14 +69,14 @@
         "type_info": "Integer"
       },
       {
-        "name": "last_calibrated",
+        "name": "is_water_level_enabled",
         "ordinal": 13,
-        "type_info": "Text"
+        "type_info": "Integer"
       },
       {
-        "name": "is_water_level_enabled",
+        "name": "last_calibrated",
         "ordinal": 14,
-        "type_info": "Integer"
+        "type_info": "Text"
       }
     ],
     "parameters": {

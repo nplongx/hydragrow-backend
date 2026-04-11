@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n            device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, \n            temp_target, temp_tolerance, control_mode, is_enabled, last_updated\n        FROM device_config WHERE device_id = ?",
+  "query": "SELECT\n            device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, \n            temp_target, temp_tolerance, control_mode, is_enabled, \n            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec, -- 🟢 THÊM VÀO ĐÂY\n            last_updated\n        FROM device_config WHERE device_id = ?",
   "describe": {
     "columns": [
       {
@@ -49,8 +49,23 @@
         "type_info": "Integer"
       },
       {
-        "name": "last_updated",
+        "name": "pump_a_capacity_ml_per_sec",
         "ordinal": 9,
+        "type_info": "Float"
+      },
+      {
+        "name": "pump_b_capacity_ml_per_sec",
+        "ordinal": 10,
+        "type_info": "Float"
+      },
+      {
+        "name": "delay_between_a_and_b_sec",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_updated",
+        "ordinal": 12,
         "type_info": "Text"
       }
     ],
@@ -67,8 +82,11 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "cca36a8f85a06f6f5f64dc7ff79e2b91010e14c3122550f8e63be483ede9fddd"
+  "hash": "f90642e610f848529296b8ea5c560a689dce6935c509cae376816f27b867679e"
 }

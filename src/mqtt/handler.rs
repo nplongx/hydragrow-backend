@@ -34,6 +34,7 @@ struct FsmPayload {
     pub current_state: String,
 }
 
+// Trong src/mqtt/handler.rs (Backend)
 #[derive(Debug, Deserialize)]
 pub struct IncomingSensorPayload {
     #[serde(rename = "temp_value")]
@@ -46,7 +47,11 @@ pub struct IncomingSensorPayload {
     pub ph: Option<f64>,
 
     pub water_level: Option<f64>,
+
+    // SỬA Ở ĐÂY: map JSON key "last_update_ms" của ESP32 vào biến này
+    #[serde(rename = "last_update_ms")]
     pub timestamp_ms: Option<u64>,
+
     pub pump_status: Option<PumpStatus>,
 }
 

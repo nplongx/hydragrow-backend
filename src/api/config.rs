@@ -486,14 +486,16 @@ pub async fn update_dosing_calibration(
     let cal = req.into_inner();
     let now = Utc::now().to_rfc3339();
 
+    // 🟢 ĐÃ BỔ SUNG CÁC TRƯỜNG PWM VÀO CÂU LỆNH SQL
     let result = sqlx::query!(
         r#"
         INSERT INTO dosing_calibration (
             device_id, tank_volume_l, ec_gain_per_ml, ph_shift_up_per_ml,
             ph_shift_down_per_ml, active_mixing_sec, sensor_stabilize_sec, ec_step_ratio, ph_step_ratio, 
             dosing_pump_capacity_ml_per_sec, soft_start_duration, last_calibrated, 
-            scheduled_mixing_interval_sec, scheduled_mixing_duration_sec
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            scheduled_mixing_interval_sec, scheduled_mixing_duration_sec,
+            dosing_pwm_percent, osaka_mixing_pwm_percent, osaka_misting_pwm_percent
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
             tank_volume_l = excluded.tank_volume_l, ec_gain_per_ml = excluded.ec_gain_per_ml,
             ph_shift_up_per_ml = excluded.ph_shift_up_per_ml, ph_shift_down_per_ml = excluded.ph_shift_down_per_ml,
@@ -503,12 +505,17 @@ pub async fn update_dosing_calibration(
             soft_start_duration = excluded.soft_start_duration,
             scheduled_mixing_interval_sec = excluded.scheduled_mixing_interval_sec,
             scheduled_mixing_duration_sec = excluded.scheduled_mixing_duration_sec,
+            dosing_pwm_percent = excluded.dosing_pwm_percent,
+            osaka_mixing_pwm_percent = excluded.osaka_mixing_pwm_percent,
+            osaka_misting_pwm_percent = excluded.osaka_misting_pwm_percent,
             last_calibrated = excluded.last_calibrated
         "#,
         device_id, cal.tank_volume_l, cal.ec_gain_per_ml, cal.ph_shift_up_per_ml,
         cal.ph_shift_down_per_ml, cal.active_mixing_sec, cal.sensor_stabilize_sec, cal.ec_step_ratio,
         cal.ph_step_ratio, cal.dosing_pump_capacity_ml_per_sec, cal.soft_start_duration,
-        now, cal.scheduled_mixing_interval_sec, cal.scheduled_mixing_duration_sec
+        now, cal.scheduled_mixing_interval_sec, cal.scheduled_mixing_duration_sec,
+        // 🟢 TRUYỀN GIÁ TRỊ VÀO MACRO
+        cal.dosing_pwm_percent, cal.osaka_mixing_pwm_percent, cal.osaka_misting_pwm_percent
     ).execute(&app_state.sqlite_pool).await;
 
     match result {
@@ -516,7 +523,10 @@ pub async fn update_dosing_calibration(
             let _ = sync_config_to_esp32(&app_state, &device_id).await;
             HttpResponse::Ok().json(json!({"status": "success"}))
         }
-        Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})),
+        Err(e) => {
+            tracing::error!("Lỗi DB Dosing Calibration: {:?}", e);
+            HttpResponse::InternalServerError().json(json!({"error": "DB Error"}))
+        }
     }
 }
 
@@ -586,4 +596,3 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             ),
     );
 }
-

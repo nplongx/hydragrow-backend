@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::prelude::FromRow;
 
 // --- CÁC STRUCT DATABASE (GIỮ NGUYÊN) ---
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -13,6 +13,9 @@ pub struct DeviceConfig {
     pub temp_tolerance: f64,
     pub control_mode: String,
     pub is_enabled: i64,
+    pub pump_a_capacity_ml_per_sec: f64,
+    pub pump_b_capacity_ml_per_sec: f64,
+    pub delay_between_a_and_b_sec: i64,
     pub last_updated: String,
 }
 
@@ -62,6 +65,10 @@ pub struct DosingCalibration {
     pub last_calibrated: String,
     pub scheduled_mixing_interval_sec: i64,
     pub scheduled_mixing_duration_sec: i64,
+
+    pub dosing_pwm_percent: i64,
+    pub osaka_mixing_pwm_percent: i64,
+    pub osaka_misting_pwm_percent: i64,
 }
 
 impl Default for DosingCalibration {
@@ -81,6 +88,10 @@ impl Default for DosingCalibration {
             last_calibrated: String::new(),
             scheduled_mixing_interval_sec: 600,
             scheduled_mixing_duration_sec: 60,
+
+            dosing_pwm_percent: 50,
+            osaka_mixing_pwm_percent: 60,
+            osaka_misting_pwm_percent: 100,
         }
     }
 }
@@ -264,6 +275,10 @@ pub struct MqttConfigPayload {
     pub enable_ph_sensor: bool,
     pub enable_water_level_sensor: bool,
     pub enable_temp_sensor: bool,
+
+    pub dosing_pwm_percent: u32,
+    pub osaka_mixing_pwm_percent: u32,
+    pub osaka_misting_pwm_percent: u32,
 }
 
 impl MqttConfigPayload {
@@ -341,7 +356,10 @@ impl MqttConfigPayload {
             enable_ph_sensor: sens.is_ph_enabled != 0,
             enable_water_level_sensor: sens.is_water_level_enabled != 0,
             enable_temp_sensor: sens.is_temp_enabled != 0,
+
+            dosing_pwm_percent: dose.dosing_pwm_percent as u32,
+            osaka_mixing_pwm_percent: dose.osaka_mixing_pwm_percent as u32,
+            osaka_misting_pwm_percent: dose.osaka_misting_pwm_percent as u32,
         }
     }
 }
-

@@ -10,13 +10,17 @@ use crate::models::{
 
 /// --- DEVICE CONFIG ---
 
+// Trong src/db/sqlite.rs
+
 #[instrument(skip(pool))]
 pub async fn get_device_config(pool: &SqlitePool, device_id: &str) -> Result<DeviceConfig> {
     let config = sqlx::query_as!(
         DeviceConfig,
         r#"SELECT
             device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
-            temp_target, temp_tolerance, control_mode, is_enabled, last_updated
+            temp_target, temp_tolerance, control_mode, is_enabled, 
+            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec, -- 🟢 THÊM VÀO ĐÂY
+            last_updated
         FROM device_config WHERE device_id = ?"#,
         device_id
     )
@@ -29,21 +33,25 @@ pub async fn get_device_config(pool: &SqlitePool, device_id: &str) -> Result<Dev
 
 #[instrument(skip(pool, config))]
 pub async fn upsert_device_config(pool: &SqlitePool, config: &DeviceConfig) -> Result<()> {
-    // Upsert pattern trong SQLite: ON CONFLICT DO UPDATE
     sqlx::query!(
         r#"
         INSERT INTO device_config (
             device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
-            temp_target, temp_tolerance, control_mode, is_enabled, last_updated
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            temp_target, temp_tolerance, control_mode, is_enabled, 
+            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec, -- 🟢 THÊM VÀO ĐÂY
+            last_updated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
             ec_target = excluded.ec_target,
             ec_tolerance = excluded.ec_tolerance,
-            ph_tolerance = excluded.ph_tolerance,
+            ph_target = excluded.ph_target,
             temp_target = excluded.temp_target,
             temp_tolerance = excluded.temp_tolerance,
             control_mode = excluded.control_mode,
             is_enabled = excluded.is_enabled,
+            pump_a_capacity_ml_per_sec = excluded.pump_a_capacity_ml_per_sec, -- 🟢 THÊM VÀO ĐÂY
+            pump_b_capacity_ml_per_sec = excluded.pump_b_capacity_ml_per_sec, -- 🟢 THÊM VÀO ĐÂY
+            delay_between_a_and_b_sec = excluded.delay_between_a_and_b_sec,   -- 🟢 THÊM VÀO ĐÂY
             last_updated = excluded.last_updated
         "#,
         config.device_id,
@@ -55,6 +63,9 @@ pub async fn upsert_device_config(pool: &SqlitePool, config: &DeviceConfig) -> R
         config.temp_tolerance,
         config.control_mode,
         config.is_enabled,
+        config.pump_a_capacity_ml_per_sec, // 🟢 TRUYỀN BIẾN
+        config.pump_b_capacity_ml_per_sec, // 🟢 TRUYỀN BIẾN
+        config.delay_between_a_and_b_sec,  // 🟢 TRUYỀN BIẾN
         config.last_updated
     )
     .execute(pool)

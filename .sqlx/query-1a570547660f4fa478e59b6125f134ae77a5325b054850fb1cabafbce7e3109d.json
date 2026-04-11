@@ -84,8 +84,18 @@
         "type_info": "Float"
       },
       {
-        "name": "last_updated",
+        "name": "misting_on_duration_ms",
         "ordinal": 16,
+        "type_info": "Integer"
+      },
+      {
+        "name": "misting_off_duration_ms",
+        "ordinal": 17,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_updated",
+        "ordinal": 18,
         "type_info": "Text"
       }
     ],
@@ -93,6 +103,8 @@
       "Right": 1
     },
     "nullable": [
+      false,
+      false,
       false,
       false,
       false,
