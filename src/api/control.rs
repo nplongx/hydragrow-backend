@@ -120,8 +120,40 @@ async fn publish_command(
     Ok(())
 }
 
+pub async fn request_device_sync(
+    path: web::Path<String>,
+    app_state: web::Data<crate::AppState>,
+) -> impl Responder {
+    let device_id = path.into_inner();
+
+    // Gửi lệnh "SYNC" xuống topic điều khiển của ESP32
+    let topic = format!("AGITECH/{}/controller/command", device_id);
+    let payload = json!({
+        "action": "SYNC_STATUS",
+        "value": 0
+    });
+
+    match serde_json::to_vec(&payload) {
+        Ok(mqtt_bytes) => {
+            let res = app_state
+                .mqtt_client
+                .publish(&topic, QoS::AtLeastOnce, false, mqtt_bytes)
+                .await;
+
+            if res.is_ok() {
+                HttpResponse::Ok().json(json!({"status": "sync_requested"}))
+            } else {
+                HttpResponse::InternalServerError().json(json!({"error": "Failed to publish"}))
+            }
+        }
+        Err(_) => HttpResponse::InternalServerError().json(json!({"error": "Serialize failed"})),
+    }
+}
+
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/devices/{device_id}/control").route("", web::post().to(control_pump)),
+        web::scope("/api/devices/{device_id}/control")
+            .route("", web::post().to(control_pump))
+            .route("/{device_id}/sync", web::post().to(request_device_sync)),
     );
 }
