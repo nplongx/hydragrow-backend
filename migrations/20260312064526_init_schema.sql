@@ -130,6 +130,30 @@ CREATE TABLE blockchain_history (
     FOREIGN KEY (device_id) REFERENCES device_config(device_id) ON DELETE CASCADE
 );
 
+-- Create crop_seasons table
+CREATE TABLE crop_seasons (
+    id TEXT PRIMARY KEY NOT NULL,
+    device_id TEXT NOT NULL,
+    name TEXT NOT NULL, -- Ví dụ: "Dưa lưới giống Nhật - Vụ Xuân 2026"
+    plant_type TEXT, -- Loại cây
+    start_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    end_time DATETIME, -- Null nếu vụ đang chạy
+    status TEXT NOT NULL DEFAULT 'active', -- 'active' hoặc 'completed'
+    FOREIGN KEY (device_id) REFERENCES device_config(device_id)
+);
+
+CREATE TABLE IF NOT EXISTS blockchain_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    season_id TEXT,
+    action TEXT NOT NULL,
+    tx_id TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Thêm cột season_id vào bảng lưu lịch sử blockchain (nếu bạn có bảng này trong DB)
+-- Hoặc chúng ta sẽ lọc (filter) dựa vào khoảng thời gian start_time -> end_time.
+
 -- INDEXES
 CREATE INDEX idx_blockchain_device ON blockchain_history(device_id);
 CREATE INDEX idx_pump_device ON pump_calibration(device_id);

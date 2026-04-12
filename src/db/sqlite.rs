@@ -1,16 +1,24 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
-use sqlx::{Error, SqlitePool};
+use serde::{Deserialize, Serialize};
+use sqlx::{Error, FromRow, SqlitePool};
 use tracing::instrument;
 
-use crate::models::{
-    blockchain::BlockchainHistoryRow,
-    config::{DeviceConfig, SafetyConfig},
-};
+use crate::models::config::{DeviceConfig, SafetyConfig};
+
+// 🟢 1. KHAI BÁO STRUCT BLOCKCHAIN RECORD ĐỂ HỨNG DỮ LIỆU TỪ DB
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct BlockchainRecord {
+    pub id: i64,
+    pub device_id: String,
+    pub season_id: Option<String>,
+    pub action: String,
+    pub tx_id: String,
+    // Trả về dạng chuỗi (String) cho dễ map với SQLite DATETIME
+    pub created_at: String,
+}
 
 /// --- DEVICE CONFIG ---
-
-// Trong src/db/sqlite.rs
 
 #[instrument(skip(pool))]
 pub async fn get_device_config(pool: &SqlitePool, device_id: &str) -> Result<DeviceConfig> {
@@ -19,7 +27,7 @@ pub async fn get_device_config(pool: &SqlitePool, device_id: &str) -> Result<Dev
         r#"SELECT
             device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
             temp_target, temp_tolerance, control_mode, is_enabled, 
-            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec, -- 🟢 THÊM VÀO ĐÂY
+            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec,
             last_updated
         FROM device_config WHERE device_id = ?"#,
         device_id
@@ -38,7 +46,7 @@ pub async fn upsert_device_config(pool: &SqlitePool, config: &DeviceConfig) -> R
         INSERT INTO device_config (
             device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
             temp_target, temp_tolerance, control_mode, is_enabled, 
-            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec, -- 🟢 THÊM VÀO ĐÂY
+            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec,
             last_updated
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
@@ -49,9 +57,9 @@ pub async fn upsert_device_config(pool: &SqlitePool, config: &DeviceConfig) -> R
             temp_tolerance = excluded.temp_tolerance,
             control_mode = excluded.control_mode,
             is_enabled = excluded.is_enabled,
-            pump_a_capacity_ml_per_sec = excluded.pump_a_capacity_ml_per_sec, -- 🟢 THÊM VÀO ĐÂY
-            pump_b_capacity_ml_per_sec = excluded.pump_b_capacity_ml_per_sec, -- 🟢 THÊM VÀO ĐÂY
-            delay_between_a_and_b_sec = excluded.delay_between_a_and_b_sec,   -- 🟢 THÊM VÀO ĐÂY
+            pump_a_capacity_ml_per_sec = excluded.pump_a_capacity_ml_per_sec,
+            pump_b_capacity_ml_per_sec = excluded.pump_b_capacity_ml_per_sec,
+            delay_between_a_and_b_sec = excluded.delay_between_a_and_b_sec,   
             last_updated = excluded.last_updated
         "#,
         config.device_id,
@@ -63,9 +71,9 @@ pub async fn upsert_device_config(pool: &SqlitePool, config: &DeviceConfig) -> R
         config.temp_tolerance,
         config.control_mode,
         config.is_enabled,
-        config.pump_a_capacity_ml_per_sec, // 🟢 TRUYỀN BIẾN
-        config.pump_b_capacity_ml_per_sec, // 🟢 TRUYỀN BIẾN
-        config.delay_between_a_and_b_sec,  // 🟢 TRUYỀN BIẾN
+        config.pump_a_capacity_ml_per_sec,
+        config.pump_b_capacity_ml_per_sec,
+        config.delay_between_a_and_b_sec,
         config.last_updated
     )
     .execute(pool)
@@ -101,9 +109,9 @@ pub async fn get_safety_config(pool: &SqlitePool, device_id: &str) -> Result<Saf
             min_temp_limit,
             max_temp_limit,
             emergency_shutdown,
-            ec_ack_threshold,     -- 🟢 Trường mới
-            ph_ack_threshold,     -- 🟢 Trường mới
-            water_ack_threshold,  -- 🟢 Trường mới
+            ec_ack_threshold,     
+            ph_ack_threshold,     
+            water_ack_threshold,  
             last_updated
         FROM safety_config
         WHERE device_id = ?
@@ -155,7 +163,7 @@ pub async fn upsert_safety_config(pool: &SqlitePool, config: &SafetyConfig) -> R
         last_updated = excluded.last_updated
     "#,
         config.device_id,
-        config.max_ec_limit, // 🟢 Đã sửa lại đúng thứ tự so với struct
+        config.max_ec_limit,
         config.min_ec_limit,
         config.min_ph_limit,
         config.max_ph_limit,
@@ -172,9 +180,9 @@ pub async fn upsert_safety_config(pool: &SqlitePool, config: &SafetyConfig) -> R
         config.min_temp_limit,
         config.max_temp_limit,
         config.emergency_shutdown,
-        config.ec_ack_threshold,    // 🟢 Trường mới
-        config.ph_ack_threshold,    // 🟢 Trường mới
-        config.water_ack_threshold, // 🟢 Trường mới
+        config.ec_ack_threshold,
+        config.ph_ack_threshold,
+        config.water_ack_threshold,
         config.last_updated
     )
     .execute(pool)
@@ -183,50 +191,53 @@ pub async fn upsert_safety_config(pool: &SqlitePool, config: &SafetyConfig) -> R
     Ok(())
 }
 
-// 1. Hàm lưu TxID mới vào CSDL (Gọi ngay sau khi bắn lên Solana thành công)
+// 🟢 2. SỬ DỤNG sqlx::query (không chấm than) và .bind() ĐỂ BYPASS LỖI COMPILE
 pub async fn insert_blockchain_tx(
     pool: &SqlitePool,
     device_id: &str,
+    season_id: &str,
     action: &str,
     tx_id: &str,
-) -> Result<(), Error> {
-    let explorer_url = format!("https://solscan.io/tx/{}?cluster=devnet", tx_id);
-    // Lưu ý: Utc::now() không được gọi ở đây nếu trong SQL không lưu. DB đang tự set CURRENT_TIMESTAMP nhưng nếu bạn muốn đồng nhất có thể dùng.
-
-    sqlx::query!(
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
         r#"
-        INSERT INTO blockchain_history (device_id, action, tx_id, explorer_url)
+        INSERT INTO blockchain_logs (device_id, season_id, action, tx_id)
         VALUES (?, ?, ?, ?)
         "#,
-        device_id,
-        action,
-        tx_id,
-        explorer_url
     )
+    .bind(device_id)
+    .bind(season_id)
+    .bind(action)
+    .bind(tx_id)
     .execute(pool)
     .await?;
-
     Ok(())
 }
 
-// 2. Hàm lấy lịch sử của thiết bị để đổ ra API Frontend
+// 🟢 3. SỬ DỤNG sqlx::query_as::<_, BlockchainRecord> (không chấm than)
 pub async fn get_device_blockchain_history(
     pool: &SqlitePool,
     device_id: &str,
-) -> Result<Vec<BlockchainHistoryRow>, Error> {
-    let history = sqlx::query_as!(
-        BlockchainHistoryRow,
-        r#"
-        SELECT id, device_id, action, tx_id, explorer_url, created_at
-        FROM blockchain_history
-        WHERE device_id = ?
-        ORDER BY created_at DESC
-        LIMIT 50
-        "#,
-        device_id
-    )
-    .fetch_all(pool)
-    .await?;
-
-    Ok(history)
+    season_id: Option<String>,
+) -> Result<Vec<BlockchainRecord>, sqlx::Error> {
+    match season_id {
+        Some(s_id) => {
+            sqlx::query_as::<_, BlockchainRecord>(
+                r#"SELECT * FROM blockchain_logs WHERE device_id = ? AND season_id = ? ORDER BY created_at DESC"#
+            )
+            .bind(device_id)
+            .bind(s_id)
+            .fetch_all(pool)
+            .await
+        },
+        None => {
+            sqlx::query_as::<_, BlockchainRecord>(
+                r#"SELECT * FROM blockchain_logs WHERE device_id = ? ORDER BY created_at DESC LIMIT 100"#
+            )
+            .bind(device_id)
+            .fetch_all(pool)
+            .await
+        }
+    }
 }
+

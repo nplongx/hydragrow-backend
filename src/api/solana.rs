@@ -4,17 +4,24 @@ use serde_json::json;
 use tracing::{error, info, instrument};
 
 use crate::AppState;
-// Import các hàm DB bạn vừa tạo (Điều chỉnh lại đường dẫn cho khớp với cấu trúc thư mục của bạn)
 use crate::db::sqlite::{
     get_device_blockchain_history as fetch_history_from_db, insert_blockchain_tx,
 };
 
+// 🟢 1. CẬP NHẬT PAYLOAD: Thêm season_id để đóng gói dữ liệu lên Blockchain
 #[derive(Deserialize, Serialize, Debug)]
 pub struct DeviceLogPayload {
     pub device_id: String,
+    pub season_id: String, // Định danh vụ mùa (VD: DUA_LUOI_XUAN_2026)
     pub action: String,
     pub value: f64,
     pub timestamp: String,
+}
+
+// 🟢 2. TẠO STRUCT QUERY: Lọc lịch sử theo từng mẻ trồng
+#[derive(Deserialize, Debug)]
+pub struct HistoryQuery {
+    pub season_id: Option<String>,
 }
 
 /* ==============================================================
@@ -35,7 +42,7 @@ pub async fn push_log_to_blockchain(
         }
     };
 
-    // 1. Ghi lên mạng Solana
+    // 1. Ghi lên mạng Solana (Payload json_string giờ đã có chứa season_id)
     match app_state
         .solana_traceability
         .record_dosing_history(&json_string)
@@ -44,10 +51,11 @@ pub async fn push_log_to_blockchain(
         Ok(tx_id) => {
             info!("✅ Đã ghi lên Solana: {}", tx_id);
 
-            // 2. LƯU LẠI VÀO CƠ SỞ DỮ LIỆU SQLITE
+            // 2. LƯU LẠI VÀO CƠ SỞ DỮ LIỆU SQLITE (Kèm theo season_id)
             if let Err(e) = insert_blockchain_tx(
                 &app_state.sqlite_pool,
                 &log_data.device_id,
+                &log_data.season_id, // 🟢 Đẩy season_id xuống Database
                 &log_data.action,
                 &tx_id,
             )
@@ -76,18 +84,24 @@ pub async fn push_log_to_blockchain(
 
 /* ==============================================================
    2. ENDPOINT: LẤY LỊCH SỬ BLOCKCHAIN TỪ SQLITE
-   GET /api/blockchain/devices/{device_id}
+   GET /api/blockchain/devices/{device_id}?season_id=...
 ============================================================== */
 #[instrument(skip(app_state))]
 pub async fn get_device_blockchain_history(
     path: web::Path<String>,
+    query: web::Query<HistoryQuery>, // 🟢 BẮT QUERY TỪ URL
     app_state: web::Data<AppState>,
 ) -> impl Responder {
     let device_id = path.into_inner();
-    info!("Đang lấy lịch sử blockchain cho thiết bị: {}", device_id);
+    let season_filter = query.into_inner().season_id;
 
-    // KÉO DỮ LIỆU THẬT TỪ SQLITE
-    match fetch_history_from_db(&app_state.sqlite_pool, &device_id).await {
+    info!(
+        "Đang lấy lịch sử blockchain cho thiết bị: {} (Mùa vụ: {:?})",
+        device_id, season_filter
+    );
+
+    // KÉO DỮ LIỆU THẬT TỪ SQLITE (Truyền thêm bộ lọc season)
+    match fetch_history_from_db(&app_state.sqlite_pool, &device_id, season_filter).await {
         Ok(history) => HttpResponse::Ok().json(json!({
             "status": "success",
             "data": history
