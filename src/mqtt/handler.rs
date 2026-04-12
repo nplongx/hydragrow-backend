@@ -178,59 +178,138 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
     let raw_payload = std::str::from_utf8(payload).unwrap_or("Lỗi UTF-8");
     info!("📥 [MQTT-FSM] {} gửi gói tin: {}", device_id, raw_payload);
 
-    // 🟢 2. Bắt lỗi Parse JSON rõ ràng (Không dùng if let nữa)
+    // 🟢 2. Bắt lỗi Parse JSON rõ ràng
     match serde_json::from_slice::<serde_json::Value>(payload) {
         Ok(json) => {
             // 🟢 3. Kiểm tra xem có trường "current_state" không
             if let Some(state) = json["current_state"].as_str() {
                 let mut alert = None;
 
-                // Phân tích loại lỗi
-                if state.starts_with("SystemFault:") {
-                    let reason = state.replace("SystemFault:", "");
-                    alert = Some(AlertMessage {
-                        level: "critical".to_string(),
-                        title: "Lỗi Hệ Thống!".to_string(),
-                        message: format!("Phát hiện lỗi phần cứng: {}. Vui lòng kiểm tra!", reason),
-                        device_id: device_id.clone(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    });
-                } else if state == "EmergencyStop" {
-                    alert = Some(AlertMessage {
-                        level: "critical".to_string(),
-                        title: "Dừng Khẩn Cấp!".to_string(),
-                        message: "Hệ thống đã bị ngắt khẩn cấp do vi phạm ngưỡng an toàn."
-                            .to_string(),
-                        device_id: device_id.clone(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    });
-                } else {
-                    // Nếu là trạng thái bình thường (Idle, Dosing...), in log nhẹ nhàng
-                    debug!("Trạng thái FSM bình thường: {}", state);
+                // 🟢 4. Phân tích chi tiết các trạng thái từ ESP32
+                match state {
+                    "EmergencyStop" => {
+                        alert = Some(AlertMessage {
+                            level: "critical".to_string(),
+                            title: "Dừng Khẩn Cấp!".to_string(),
+                            message: "Hệ thống đã bị ngắt khẩn cấp do vi phạm ngưỡng an toàn."
+                                .to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    s if s.starts_with("SystemFault:") => {
+                        let reason = s.replace("SystemFault:", "");
+                        alert = Some(AlertMessage {
+                            level: "critical".to_string(),
+                            title: "Lỗi Hệ Thống!".to_string(),
+                            message: format!(
+                                "Phát hiện lỗi phần cứng: {}. Vui lòng kiểm tra!",
+                                reason
+                            ),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "WaterRefilling" => {
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(),
+                            title: "Cấp Nước".to_string(),
+                            message: "Hệ thống đang tiến hành bơm cấp nước vào bồn.".to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "WaterDraining" => {
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(),
+                            title: "Xả Nước".to_string(),
+                            message: "Hệ thống đang xả bớt nước trong bồn.".to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "DosingPumpA" => {
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(),
+                            title: "Châm Phân".to_string(),
+                            message: "Đang tiến hành châm phân bón Dinh Dưỡng A.".to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "DosingPumpB" => {
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(),
+                            title: "Châm Phân".to_string(),
+                            message: "Đang tiến hành châm phân bón Dinh Dưỡng B.".to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "DosingPH" => {
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(),
+                            title: "Điều Chỉnh pH".to_string(),
+                            message: "Đang tiến hành bơm dung dịch điều chỉnh pH.".to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "ActiveMixing" => {
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(),
+                            title: "Sục Trộn Dinh Dưỡng".to_string(),
+                            message: "Đang trộn đều dung dịch trong bồn (Jet Mixing).".to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    // Các trạng thái quá độ/chuyển tiếp ngắn, chỉ in log Backend để tránh spam UI Frontend
+                    "StartingOsakaPump" => {
+                        debug!("Bắt đầu khởi động bơm trung tâm (Osaka).");
+                    }
+                    "WaitingBetweenDose" => {
+                        debug!("Đang chờ hòa tan giữa 2 lần châm A và B.");
+                    }
+                    "Stabilizing" => {
+                        debug!("Đang chờ cảm biến đọc số liệu ổn định.");
+                    }
+                    "Monitoring" => {
+                        debug!("Hệ thống đang ở trạng thái giám sát (Monitoring).");
+                    }
+                    _ => {
+                        debug!("Trạng thái FSM khác: {}", state);
+                    }
                 }
 
-                // Nếu có cảnh báo, xử lý 2 luồng: WebSocket (React) & FCM (Android)
+                // 🟢 5. Xử lý phân luồng thông báo (UI vs Mobile Push)
                 if let Some(alert_msg) = alert {
-                    info!("🚨 KÍCH HOẠT BÁO ĐỘNG: {}", alert_msg.title);
+                    if alert_msg.level == "critical" || alert_msg.level == "warning" {
+                        info!("🚨 KÍCH HOẠT BÁO ĐỘNG: {}", alert_msg.title);
+                    } else {
+                        info!("ℹ️ THAY ĐỔI TRẠNG THÁI: {}", alert_msg.title);
+                    }
 
-                    // -> Gửi lên React App đang mở trên màn hình
+                    // Luôn gửi lên WebSocket (Cho React Web hiển thị Toast/Timeline)
                     let _ = app_state.alert_sender.send(alert_msg.clone());
 
-                    // -> Gửi lên Firebase Cloud Messaging
-                    let tokens = app_state.fcm_tokens.lock().unwrap().clone();
-                    if tokens.is_empty() {
-                        warn!(
-                            "⚠️ Không có FCM Token nào trong RAM! Không thể gửi Push Notification tới điện thoại."
-                        );
-                    } else {
-                        tokio::spawn(async move {
-                            crate::services::fcm::send_push_notification(
-                                &alert_msg.title,
-                                &alert_msg.message,
-                                tokens,
-                            )
-                            .await;
-                        });
+                    // CHỈ gửi Push Notification tới Mobile nếu là lỗi (Tránh spam thông báo điện thoại)
+                    if alert_msg.level == "critical" || alert_msg.level == "warning" {
+                        let tokens = app_state.fcm_tokens.lock().unwrap().clone();
+                        if tokens.is_empty() {
+                            warn!(
+                                "⚠️ Không có FCM Token nào trong RAM! Không thể gửi Push Notification tới điện thoại."
+                            );
+                        } else {
+                            tokio::spawn(async move {
+                                crate::services::fcm::send_push_notification(
+                                    &alert_msg.title,
+                                    &alert_msg.message,
+                                    tokens,
+                                )
+                                .await;
+                            });
+                        }
                     }
                 }
             } else {
