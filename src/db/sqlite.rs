@@ -241,3 +241,65 @@ pub async fn get_device_blockchain_history(
     }
 }
 
+use crate::models::crop_season::{CreateCropSeasonRequest, CropSeason};
+
+// Lấy mùa vụ đang chạy
+pub async fn get_active_crop_season(
+    pool: &SqlitePool,
+    device_id: &str,
+) -> Result<Option<CropSeason>, sqlx::Error> {
+    let season = sqlx::query_as::<_, CropSeason>(
+        "SELECT id, device_id, name, plant_type, CAST(start_time AS TEXT) as start_time, CAST(end_time AS TEXT) as end_time, status 
+         FROM crop_seasons WHERE device_id = ? AND status = 'active' LIMIT 1"
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(season)
+}
+
+// Lấy lịch sử mùa vụ
+pub async fn get_crop_seasons_history(
+    pool: &SqlitePool,
+    device_id: &str,
+) -> Result<Vec<CropSeason>, sqlx::Error> {
+    let seasons = sqlx::query_as::<_, CropSeason>(
+        "SELECT id, device_id, name, plant_type, CAST(start_time AS TEXT) as start_time, CAST(end_time AS TEXT) as end_time, status 
+         FROM crop_seasons WHERE device_id = ? ORDER BY start_time DESC"
+    )
+    .bind(device_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(seasons)
+}
+
+// Tạo mùa vụ mới
+pub async fn create_crop_season(
+    pool: &SqlitePool,
+    device_id: &str,
+    req: CreateCropSeasonRequest,
+) -> Result<Option<CropSeason>, sqlx::Error> {
+    let id = uuid::Uuid::new_v4().to_string(); // Đảm bảo bạn đã thêm `uuid = { version = "1.0", features = ["v4"] }` vào Cargo.toml
+    sqlx::query(
+        "INSERT INTO crop_seasons (id, device_id, name, plant_type, status) VALUES (?, ?, ?, ?, 'active')"
+    )
+    .bind(&id)
+    .bind(device_id)
+    .bind(&req.name)
+    .bind(&req.plant_type)
+    .execute(pool)
+    .await?;
+
+    get_active_crop_season(pool, device_id).await
+}
+
+// Kết thúc mùa vụ
+pub async fn end_active_crop_season(pool: &SqlitePool, device_id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE crop_seasons SET status = 'completed', end_time = CURRENT_TIMESTAMP WHERE device_id = ? AND status = 'active'"
+    )
+    .bind(device_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
