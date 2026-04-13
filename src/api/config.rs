@@ -549,48 +549,27 @@ pub async fn update_dosing_calibration(
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg
         // 🟢 NEW: API gộp (Lưu 1 lần duy nhất)
-        .route(
-            "/{device_id}/config/unified",
-            web::put().to(update_unified_config),
-        )
-        .route(
-            "/{device_id}/config/unified",
-            web::get().to(get_unified_device_config),
-        )
+        .route("/config/unified", web::put().to(update_unified_config))
+        .route("/config/unified", web::get().to(get_unified_device_config))
         // Base config
-        .route("/{device_id}/config", web::get().to(get_config))
-        .route("/{device_id}/config", web::put().to(update_config))
+        .route("/config", web::get().to(get_config))
+        .route("/config", web::put().to(update_config))
         // Safety config
-        .route(
-            "/{device_id}/config/safety",
-            web::get().to(get_safety_config),
-        )
-        .route(
-            "/{device_id}/config/safety",
-            web::post().to(update_safety_config),
-        )
+        .route("/safety", web::get().to(get_safety_config))
+        .route("/config/safety", web::post().to(update_safety_config))
         // Water config
-        .route("/{device_id}/config/water", web::get().to(get_water_config))
-        .route(
-            "/{device_id}/config/water",
-            web::post().to(update_water_config),
-        )
+        .route("/config/water", web::get().to(get_water_config))
+        .route("/config/water", web::post().to(update_water_config))
         // Sensor Calibration
+        .route("/calibration/sensor", web::get().to(get_sensor_calibration))
         .route(
-            "/{device_id}/calibration/sensor",
-            web::get().to(get_sensor_calibration),
-        )
-        .route(
-            "/{device_id}/calibration/sensor",
+            "/calibration/sensor",
             web::post().to(update_sensor_calibration),
         )
         // Dosing Calibration
+        .route("/calibration/dosing", web::get().to(get_dosing_calibration))
         .route(
-            "/{device_id}/calibration/dosing",
-            web::get().to(get_dosing_calibration),
-        )
-        .route(
-            "/{device_id}/calibration/dosing",
+            "/calibration/dosing",
             web::post().to(update_dosing_calibration),
         );
 }
