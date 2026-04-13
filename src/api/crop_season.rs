@@ -57,9 +57,14 @@ async fn end_season(path: web::Path<String>, app_state: web::Data<AppState>) -> 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/api/devices/{device_id}/seasons")
+            // 1. Gom các method (GET, POST) chung một đường dẫn gốc "" vào một resource
+            .service(
+                web::resource("")
+                    .route(web::get().to(get_seasons_history))
+                    .route(web::post().to(create_season)),
+            )
+            // 2. Các sub-path còn lại giữ nguyên
             .route("/active", web::get().to(get_active_season))
-            .route("", web::get().to(get_seasons_history))
-            .route("", web::post().to(create_season))
             .route("/active/end", web::put().to(end_season)),
     );
 }
