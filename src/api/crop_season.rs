@@ -54,8 +54,8 @@ async fn end_season(path: web::Path<String>, app_state: web::Data<AppState>) -> 
 }
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.route("", web::get().to(get_seasons_history))
-        .route("", web::post().to(create_season))
+    cfg.route("/seasons", web::get().to(get_seasons_history))
+        .route("/seasons", web::post().to(create_season))
         .route("/seasons/active", web::get().to(get_active_season))
         .route("/seasons/active/end", web::put().to(end_season));
 }
