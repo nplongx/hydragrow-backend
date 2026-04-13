@@ -428,8 +428,7 @@ pub async fn update_dosing_calibration(path: web::Path<String>, req: web::Json<D
 // ==========================================
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("/api/devices")
+    cfg
             // 🟢 NEW: API gộp (Lưu 1 lần duy nhất)
             .route(
                 "/{device_id}/config/unified",
@@ -453,6 +452,5 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route("/{device_id}/calibration/sensor", web::post().to(update_sensor_calibration))
             // Dosing Calibration
             .route("/{device_id}/calibration/dosing", web::get().to(get_dosing_calibration))
-            .route("/{device_id}/calibration/dosing", web::post().to(update_dosing_calibration)),
-    );
+            .route("/{device_id}/calibration/dosing", web::post().to(update_dosing_calibration));
 }

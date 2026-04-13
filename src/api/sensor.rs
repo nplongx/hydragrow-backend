@@ -82,9 +82,6 @@ pub async fn get_history(
 }
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("/api/devices/{device_id}/sensors")
-            .route("/latest", web::get().to(get_latest))
-            .route("/history", web::get().to(get_history)),
-    );
+    cfg.route("/latest", web::get().to(get_latest))
+        .route("/history", web::get().to(get_history));
 }

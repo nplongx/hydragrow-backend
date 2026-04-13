@@ -178,13 +178,16 @@ async fn main() -> anyhow::Result<()> {
             .app_data(app_state.clone())
             .wrap(rate_limit_middleware)
             .wrap(auth_middleware)
-            .configure(api::control::init_routes)
-            .configure(api::sensor::init_routes)
-            .configure(api::ws::init_routes)
-            .configure(api::config::init_routes)
-            .configure(api::solana::init_routes)
-            .configure(api::notification::init_routes)
-            .configure(api::crop_season::init_routes) // <--- THÊM VÀO ĐÂY
+            .service(
+                web::scope("/api/devices/{device_id}")
+                    .configure(api::control::init_routes)
+                    .configure(api::sensor::init_routes)
+                    .configure(api::ws::init_routes)
+                    .configure(api::config::init_routes)
+                    .configure(api::solana::init_routes)
+                    .configure(api::notification::init_routes)
+                    .configure(api::crop_season::init_routes),
+            )
     })
     .bind((server_host, server_port))?
     .run()
