@@ -20,52 +20,42 @@ async fn fetch_unified_mqtt_config(
     device_id: &str,
 ) -> Result<MqttConfigPayload, String> {
     // 1. Lấy Base Config (Bắt buộc phải có)
-    let dev = sqlx::query_as!(
-        DeviceConfig,
-        "SELECT * FROM device_config WHERE device_id = ?",
-        device_id
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("DB Error: {}", e))?
-    .ok_or_else(|| "Device base config not found".to_string())?;
+    let dev = sqlx::query_as::<_, DeviceConfig>("SELECT * FROM device_config WHERE device_id = ?")
+        .bind(device_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("DB Error: {}", e))?
+        .ok_or_else(|| "Device base config not found".to_string())?;
 
     // 2. Lấy Water Config (fallback về Default)
-    let water = sqlx::query_as!(
-        WaterConfig,
-        "SELECT * FROM water_config WHERE device_id = ?",
-        device_id
-    )
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or_else(|| WaterConfig {
-        device_id: device_id.to_string(),
-        ..Default::default()
-    });
+    let water = sqlx::query_as::<_, WaterConfig>("SELECT * FROM water_config WHERE device_id = ?")
+        .bind(device_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| WaterConfig {
+            device_id: device_id.to_string(),
+            ..Default::default()
+        });
 
     // 3. Lấy Safety Config (fallback về Default)
-    let safe = sqlx::query_as!(
-        SafetyConfig,
-        "SELECT * FROM safety_config WHERE device_id = ?",
-        device_id
-    )
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or_else(|| SafetyConfig {
-        device_id: device_id.to_string(),
-        ..Default::default()
-    });
+    let safe = sqlx::query_as::<_, SafetyConfig>("SELECT * FROM safety_config WHERE device_id = ?")
+        .bind(device_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| SafetyConfig {
+            device_id: device_id.to_string(),
+            ..Default::default()
+        });
 
     // 4. Lấy Dosing Calibration (fallback về Default)
-    let dose = sqlx::query_as!(
-        DosingCalibration,
+    let dose = sqlx::query_as::<_, DosingCalibration>(
         "SELECT * FROM dosing_calibration WHERE device_id = ?",
-        device_id
     )
+    .bind(device_id)
     .fetch_optional(pool)
     .await
     .ok()
@@ -76,11 +66,10 @@ async fn fetch_unified_mqtt_config(
     });
 
     // 5. Lấy Sensor Calibration (fallback về Default)
-    let sens = sqlx::query_as!(
-        SensorCalibration,
+    let sens = sqlx::query_as::<_, SensorCalibration>(
         "SELECT * FROM sensor_calibration WHERE device_id = ?",
-        device_id
     )
+    .bind(device_id)
     .fetch_optional(pool)
     .await
     .ok()
@@ -117,7 +106,8 @@ pub async fn sync_config_to_esp32(
     let payload = fetch_unified_mqtt_config(&app_state.sqlite_pool, device_id).await?;
 
     let mqtt_topic = format!("AGITECH/{}/controller/config", device_id);
-    let mqtt_bytes = serde_json::to_vec(&payload).map_err(|e| format!("Lỗi serialize payload: {:?}", e))?;
+    let mqtt_bytes =
+        serde_json::to_vec(&payload).map_err(|e| format!("Lỗi serialize payload: {:?}", e))?;
 
     app_state
         .mqtt_client
@@ -125,7 +115,10 @@ pub async fn sync_config_to_esp32(
         .await
         .map_err(|e| format!("Lỗi gửi MQTT: {:?}", e))?;
 
-    info!("✅ Đã đồng bộ cấu hình FULL hợp nhất xuống ESP32 ({})", device_id);
+    info!(
+        "✅ Đã đồng bộ cấu hình FULL hợp nhất xuống ESP32 ({})",
+        device_id
+    );
     Ok(())
 }
 
@@ -133,8 +126,12 @@ pub async fn sync_config_to_esp32(
 // DB UPSERT HELPERS (Chống lặp code SQL)
 // ==========================================
 
-async fn upsert_water_db(pool: &sqlx::SqlitePool, config: &WaterConfig, now: &str) -> Result<(), sqlx::Error> {
-    sqlx::query!(
+async fn upsert_water_db(
+    pool: &sqlx::SqlitePool,
+    config: &WaterConfig,
+    now: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
         r#"
         INSERT INTO water_config (
             device_id, water_level_min, water_level_target, water_level_max,
@@ -164,17 +161,37 @@ async fn upsert_water_db(pool: &sqlx::SqlitePool, config: &WaterConfig, now: &st
             misting_off_duration_ms = excluded.misting_off_duration_ms,
             last_updated = excluded.last_updated
         "#,
-        config.device_id, config.water_level_min, config.water_level_target, config.water_level_max,
-        config.water_level_drain, config.circulation_mode, config.circulation_on_sec, config.circulation_off_sec,
-        config.water_level_tolerance, config.auto_refill_enabled, config.auto_drain_overflow, config.auto_dilute_enabled,
-        config.dilute_drain_amount_cm, config.scheduled_water_change_enabled, config.water_change_interval_sec,
-        config.scheduled_drain_amount_cm, config.misting_on_duration_ms, config.misting_off_duration_ms, now
-    ).execute(pool).await?;
+    )
+    .bind(&config.device_id)
+    .bind(config.water_level_min)
+    .bind(config.water_level_target)
+    .bind(config.water_level_max)
+    .bind(config.water_level_drain)
+    .bind(&config.circulation_mode)
+    .bind(config.circulation_on_sec)
+    .bind(config.circulation_off_sec)
+    .bind(config.water_level_tolerance)
+    .bind(config.auto_refill_enabled)
+    .bind(config.auto_drain_overflow)
+    .bind(config.auto_dilute_enabled)
+    .bind(config.dilute_drain_amount_cm)
+    .bind(config.scheduled_water_change_enabled)
+    .bind(config.water_change_interval_sec)
+    .bind(config.scheduled_drain_amount_cm)
+    .bind(config.misting_on_duration_ms)
+    .bind(config.misting_off_duration_ms)
+    .bind(now)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
-async fn upsert_sensor_db(pool: &sqlx::SqlitePool, cal: &SensorCalibration, now: &str) -> Result<(), sqlx::Error> {
-    sqlx::query!(
+async fn upsert_sensor_db(
+    pool: &sqlx::SqlitePool,
+    cal: &SensorCalibration,
+    now: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
         r#"
         INSERT INTO sensor_calibration (
             device_id, ph_v7, ph_v4, ec_factor, ec_offset, temp_offset,
@@ -189,16 +206,33 @@ async fn upsert_sensor_db(pool: &sqlx::SqlitePool, cal: &SensorCalibration, now:
             is_ph_enabled = excluded.is_ph_enabled, is_ec_enabled = excluded.is_ec_enabled,
             is_temp_enabled = excluded.is_temp_enabled, is_water_level_enabled = excluded.is_water_level_enabled,
             last_calibrated = excluded.last_calibrated
-        "#,
-        cal.device_id, cal.ph_v7, cal.ph_v4, cal.ec_factor, cal.ec_offset, cal.temp_offset,
-        cal.temp_compensation_beta, cal.sampling_interval, cal.publish_interval, cal.moving_average_window,
-        cal.is_ph_enabled, cal.is_ec_enabled, cal.is_temp_enabled, cal.is_water_level_enabled, now
-    ).execute(pool).await?;
+        "#
+    )
+    .bind(&cal.device_id)
+    .bind(cal.ph_v7)
+    .bind(cal.ph_v4)
+    .bind(cal.ec_factor)
+    .bind(cal.ec_offset)
+    .bind(cal.temp_offset)
+    .bind(cal.temp_compensation_beta)
+    .bind(cal.sampling_interval)
+    .bind(cal.publish_interval)
+    .bind(cal.moving_average_window)
+    .bind(cal.is_ph_enabled)
+    .bind(cal.is_ec_enabled)
+    .bind(cal.is_temp_enabled)
+    .bind(cal.is_water_level_enabled)
+    .bind(now)
+    .execute(pool).await?;
     Ok(())
 }
 
-async fn upsert_dosing_db(pool: &sqlx::SqlitePool, cal: &DosingCalibration, now: &str) -> Result<(), sqlx::Error> {
-    sqlx::query!(
+async fn upsert_dosing_db(
+    pool: &sqlx::SqlitePool,
+    cal: &DosingCalibration,
+    now: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
         r#"
         INSERT INTO dosing_calibration (
             device_id, tank_volume_l, ec_gain_per_ml, ph_shift_up_per_ml,
@@ -217,17 +251,31 @@ async fn upsert_dosing_db(pool: &sqlx::SqlitePool, cal: &DosingCalibration, now:
             scheduled_mixing_duration_sec = excluded.scheduled_mixing_duration_sec, dosing_pwm_percent = excluded.dosing_pwm_percent,
             osaka_mixing_pwm_percent = excluded.osaka_mixing_pwm_percent, osaka_misting_pwm_percent = excluded.osaka_misting_pwm_percent,
             last_calibrated = excluded.last_calibrated
-        "#,
-        cal.device_id, cal.tank_volume_l, cal.ec_gain_per_ml, cal.ph_shift_up_per_ml, cal.ph_shift_down_per_ml, 
-        cal.active_mixing_sec, cal.sensor_stabilize_sec, cal.ec_step_ratio, cal.ph_step_ratio, cal.dosing_pump_capacity_ml_per_sec, 
-        cal.soft_start_duration, now, cal.scheduled_mixing_interval_sec, cal.scheduled_mixing_duration_sec,
-        cal.dosing_pwm_percent, cal.osaka_mixing_pwm_percent, cal.osaka_misting_pwm_percent
-    ).execute(pool).await?;
+        "#
+    )
+    .bind(&cal.device_id)
+    .bind(cal.tank_volume_l)
+    .bind(cal.ec_gain_per_ml)
+    .bind(cal.ph_shift_up_per_ml)
+    .bind(cal.ph_shift_down_per_ml)
+    .bind(cal.active_mixing_sec)
+    .bind(cal.sensor_stabilize_sec)
+    .bind(cal.ec_step_ratio)
+    .bind(cal.ph_step_ratio)
+    .bind(cal.dosing_pump_capacity_ml_per_sec)
+    .bind(cal.soft_start_duration)
+    .bind(now)
+    .bind(cal.scheduled_mixing_interval_sec)
+    .bind(cal.scheduled_mixing_duration_sec)
+    .bind(cal.dosing_pwm_percent)
+    .bind(cal.osaka_mixing_pwm_percent)
+    .bind(cal.osaka_misting_pwm_percent)
+    .execute(pool).await?;
     Ok(())
 }
 
 // ==========================================
-// 🟢 API HANDLER: CẬP NHẬT GỘP (UNIFIED) 
+// 🟢 API HANDLER: CẬP NHẬT GỘP (UNIFIED)
 // Chỉ tạo 1 request, lưu toàn bộ và bắn MQTT 1 lần
 // ==========================================
 
@@ -253,7 +301,10 @@ pub async fn update_unified_config(
     // 1. Lưu Base Config
     payload.device_config.device_id = device_id.clone();
     payload.device_config.last_updated = now.clone();
-    if let Err(e) = crate::db::sqlite::upsert_device_config(&app_state.sqlite_pool, &payload.device_config).await {
+    if let Err(e) =
+        crate::db::sqlite::upsert_device_config(&app_state.sqlite_pool, &payload.device_config)
+            .await
+    {
         error!("Failed to update device config: {:?}", e);
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error: Device"}));
     }
@@ -261,7 +312,10 @@ pub async fn update_unified_config(
     // 2. Lưu Safety Config
     payload.safety_config.device_id = device_id.clone();
     payload.safety_config.last_updated = now.clone();
-    if let Err(e) = crate::db::sqlite::upsert_safety_config(&app_state.sqlite_pool, &payload.safety_config).await {
+    if let Err(e) =
+        crate::db::sqlite::upsert_safety_config(&app_state.sqlite_pool, &payload.safety_config)
+            .await
+    {
         error!("Failed to update safety config: {:?}", e);
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error: Safety"}));
     }
@@ -275,14 +329,18 @@ pub async fn update_unified_config(
 
     // 4. Lưu Sensor Config
     payload.sensor_calibration.device_id = device_id.clone();
-    if let Err(e) = upsert_sensor_db(&app_state.sqlite_pool, &payload.sensor_calibration, &now).await {
+    if let Err(e) =
+        upsert_sensor_db(&app_state.sqlite_pool, &payload.sensor_calibration, &now).await
+    {
         error!("Failed to update sensor config: {:?}", e);
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error: Sensor"}));
     }
 
     // 5. Lưu Dosing Config
     payload.dosing_calibration.device_id = device_id.clone();
-    if let Err(e) = upsert_dosing_db(&app_state.sqlite_pool, &payload.dosing_calibration, &now).await {
+    if let Err(e) =
+        upsert_dosing_db(&app_state.sqlite_pool, &payload.dosing_calibration, &now).await
+    {
         error!("Failed to update dosing config: {:?}", e);
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error: Dosing"}));
     }
@@ -298,7 +356,6 @@ pub async fn update_unified_config(
 
     HttpResponse::Ok().json(json!({"status": "success"}))
 }
-
 
 // ==========================================
 // API HANDLERS - AGGREGATED VIEWS (CHO FRONTEND)
@@ -316,12 +373,8 @@ pub async fn get_unified_device_config(
     }
 }
 
-// ... (Giữ nguyên các API Handlers GET/POST đơn lẻ cũ của bạn nếu vẫn cần dùng ở chỗ khác) ...
-// Để gọn, bạn có thể giữ nguyên các hàm `get_config`, `update_config`, `get_water_config`, `update_water_config`... ở bên dưới.
-
 #[instrument(skip(app_state))]
 pub async fn get_config(path: web::Path<String>, app_state: web::Data<AppState>) -> impl Responder {
-    // ... Giữ nguyên như cũ
     let device_id = path.into_inner();
     match crate::db::sqlite::get_device_config(&app_state.sqlite_pool, &device_id).await {
         Ok(config) => HttpResponse::Ok().json(config),
@@ -333,28 +386,47 @@ pub async fn get_config(path: web::Path<String>, app_state: web::Data<AppState>)
 }
 
 #[instrument(skip(app_state, payload))]
-pub async fn update_config(path: web::Path<String>, payload: web::Json<DeviceConfig>, app_state: web::Data<AppState>) -> impl Responder {
+pub async fn update_config(
+    path: web::Path<String>,
+    payload: web::Json<DeviceConfig>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let device_id = path.into_inner();
     let mut config = payload.into_inner();
     config.device_id = device_id.clone();
     config.last_updated = Utc::now().to_rfc3339();
     if let Err(e) = crate::db::sqlite::upsert_device_config(&app_state.sqlite_pool, &config).await {
         error!("Failed to update base config in DB: {:?}", e);
-        return HttpResponse::InternalServerError().json(json!({"error": "Failed to save configuration"}));
+        return HttpResponse::InternalServerError()
+            .json(json!({"error": "Failed to save configuration"}));
     }
     let _ = sync_config_to_esp32(&app_state, &device_id).await;
     HttpResponse::Ok().json(json!({"status": "success"}))
 }
 
 #[instrument(skip(app_state))]
-pub async fn get_water_config(path: web::Path<String>, app_state: web::Data<AppState>) -> impl Responder {
+pub async fn get_water_config(
+    path: web::Path<String>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let device_id = path.into_inner();
-    let result = sqlx::query_as!(WaterConfig, "SELECT * FROM water_config WHERE device_id = ?", device_id).fetch_optional(&app_state.sqlite_pool).await;
-    match result { Ok(Some(config)) => HttpResponse::Ok().json(config), Ok(None) => HttpResponse::NotFound().json(json!({"error": "Not found"})), Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})) }
+    let result = sqlx::query_as::<_, WaterConfig>("SELECT * FROM water_config WHERE device_id = ?")
+        .bind(device_id)
+        .fetch_optional(&app_state.sqlite_pool)
+        .await;
+    match result {
+        Ok(Some(config)) => HttpResponse::Ok().json(config),
+        Ok(None) => HttpResponse::NotFound().json(json!({"error": "Not found"})),
+        Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})),
+    }
 }
 
 #[instrument(skip(app_state, req))]
-pub async fn update_water_config(path: web::Path<String>, req: web::Json<WaterConfig>, app_state: web::Data<AppState>) -> impl Responder {
+pub async fn update_water_config(
+    path: web::Path<String>,
+    req: web::Json<WaterConfig>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let device_id = path.into_inner();
     let config = req.into_inner();
     let now = Utc::now().to_rfc3339();
@@ -366,14 +438,29 @@ pub async fn update_water_config(path: web::Path<String>, req: web::Json<WaterCo
 }
 
 #[instrument(skip(app_state))]
-pub async fn get_safety_config(path: web::Path<String>, app_state: web::Data<AppState>) -> impl Responder {
+pub async fn get_safety_config(
+    path: web::Path<String>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let device_id = path.into_inner();
-    let result = sqlx::query_as!(SafetyConfig, "SELECT * FROM safety_config WHERE device_id = ?", device_id).fetch_optional(&app_state.sqlite_pool).await;
-    match result { Ok(Some(config)) => HttpResponse::Ok().json(config), Ok(None) => HttpResponse::NotFound().json(json!({"error": "Not found"})), Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})) }
+    let result =
+        sqlx::query_as::<_, SafetyConfig>("SELECT * FROM safety_config WHERE device_id = ?")
+            .bind(device_id)
+            .fetch_optional(&app_state.sqlite_pool)
+            .await;
+    match result {
+        Ok(Some(config)) => HttpResponse::Ok().json(config),
+        Ok(None) => HttpResponse::NotFound().json(json!({"error": "Not found"})),
+        Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})),
+    }
 }
 
 #[instrument(skip(app_state, req))]
-pub async fn update_safety_config(path: web::Path<String>, req: web::Json<SafetyConfig>, app_state: web::Data<AppState>) -> impl Responder {
+pub async fn update_safety_config(
+    path: web::Path<String>,
+    req: web::Json<SafetyConfig>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let device_id = path.into_inner();
     let mut config = req.into_inner();
     config.device_id = device_id.clone();
@@ -386,14 +473,30 @@ pub async fn update_safety_config(path: web::Path<String>, req: web::Json<Safety
 }
 
 #[instrument(skip(app_state))]
-pub async fn get_sensor_calibration(path: web::Path<String>, app_state: web::Data<AppState>) -> impl Responder {
+pub async fn get_sensor_calibration(
+    path: web::Path<String>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let device_id = path.into_inner();
-    let result = sqlx::query_as!(SensorCalibration, "SELECT * FROM sensor_calibration WHERE device_id = ?", device_id).fetch_optional(&app_state.sqlite_pool).await;
-    match result { Ok(Some(config)) => HttpResponse::Ok().json(config), Ok(None) => HttpResponse::NotFound().json(json!({"error": "Not found"})), Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})) }
+    let result = sqlx::query_as::<_, SensorCalibration>(
+        "SELECT * FROM sensor_calibration WHERE device_id = ?",
+    )
+    .bind(device_id)
+    .fetch_optional(&app_state.sqlite_pool)
+    .await;
+    match result {
+        Ok(Some(config)) => HttpResponse::Ok().json(config),
+        Ok(None) => HttpResponse::NotFound().json(json!({"error": "Not found"})),
+        Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})),
+    }
 }
 
 #[instrument(skip(app_state, req))]
-pub async fn update_sensor_calibration(path: web::Path<String>, req: web::Json<SensorCalibration>, app_state: web::Data<AppState>) -> impl Responder {
+pub async fn update_sensor_calibration(
+    path: web::Path<String>,
+    req: web::Json<SensorCalibration>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let device_id = path.into_inner();
     let config = req.into_inner();
     let now = Utc::now().to_rfc3339();
@@ -405,14 +508,30 @@ pub async fn update_sensor_calibration(path: web::Path<String>, req: web::Json<S
 }
 
 #[instrument(skip(app_state))]
-pub async fn get_dosing_calibration(path: web::Path<String>, app_state: web::Data<AppState>) -> impl Responder {
+pub async fn get_dosing_calibration(
+    path: web::Path<String>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let device_id = path.into_inner();
-    let result = sqlx::query_as!(DosingCalibration, "SELECT * FROM dosing_calibration WHERE device_id = ?", device_id).fetch_optional(&app_state.sqlite_pool).await;
-    match result { Ok(Some(config)) => HttpResponse::Ok().json(config), Ok(None) => HttpResponse::NotFound().json(json!({"error": "Not found"})), Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})) }
+    let result = sqlx::query_as::<_, DosingCalibration>(
+        "SELECT * FROM dosing_calibration WHERE device_id = ?",
+    )
+    .bind(device_id)
+    .fetch_optional(&app_state.sqlite_pool)
+    .await;
+    match result {
+        Ok(Some(config)) => HttpResponse::Ok().json(config),
+        Ok(None) => HttpResponse::NotFound().json(json!({"error": "Not found"})),
+        Err(_) => HttpResponse::InternalServerError().json(json!({"error": "DB Error"})),
+    }
 }
 
 #[instrument(skip(app_state, req))]
-pub async fn update_dosing_calibration(path: web::Path<String>, req: web::Json<DosingCalibration>, app_state: web::Data<AppState>) -> impl Responder {
+pub async fn update_dosing_calibration(
+    path: web::Path<String>,
+    req: web::Json<DosingCalibration>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let device_id = path.into_inner();
     let config = req.into_inner();
     let now = Utc::now().to_rfc3339();
@@ -429,28 +548,50 @@ pub async fn update_dosing_calibration(path: web::Path<String>, req: web::Json<D
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg
-            // 🟢 NEW: API gộp (Lưu 1 lần duy nhất)
-            .route(
-                "/{device_id}/config/unified",
-                web::put().to(update_unified_config),
-            )
-            .route(
-                "/{device_id}/config/unified",
-                web::get().to(get_unified_device_config),
-            )
-            // Base config
-            .route("/{device_id}/config", web::get().to(get_config))
-            .route("/{device_id}/config", web::put().to(update_config))
-            // Safety config
-            .route("/{device_id}/config/safety", web::get().to(get_safety_config))
-            .route("/{device_id}/config/safety", web::post().to(update_safety_config))
-            // Water config
-            .route("/{device_id}/config/water", web::get().to(get_water_config))
-            .route("/{device_id}/config/water", web::post().to(update_water_config))
-            // Sensor Calibration
-            .route("/{device_id}/calibration/sensor", web::get().to(get_sensor_calibration))
-            .route("/{device_id}/calibration/sensor", web::post().to(update_sensor_calibration))
-            // Dosing Calibration
-            .route("/{device_id}/calibration/dosing", web::get().to(get_dosing_calibration))
-            .route("/{device_id}/calibration/dosing", web::post().to(update_dosing_calibration));
+        // 🟢 NEW: API gộp (Lưu 1 lần duy nhất)
+        .route(
+            "/{device_id}/config/unified",
+            web::put().to(update_unified_config),
+        )
+        .route(
+            "/{device_id}/config/unified",
+            web::get().to(get_unified_device_config),
+        )
+        // Base config
+        .route("/{device_id}/config", web::get().to(get_config))
+        .route("/{device_id}/config", web::put().to(update_config))
+        // Safety config
+        .route(
+            "/{device_id}/config/safety",
+            web::get().to(get_safety_config),
+        )
+        .route(
+            "/{device_id}/config/safety",
+            web::post().to(update_safety_config),
+        )
+        // Water config
+        .route("/{device_id}/config/water", web::get().to(get_water_config))
+        .route(
+            "/{device_id}/config/water",
+            web::post().to(update_water_config),
+        )
+        // Sensor Calibration
+        .route(
+            "/{device_id}/calibration/sensor",
+            web::get().to(get_sensor_calibration),
+        )
+        .route(
+            "/{device_id}/calibration/sensor",
+            web::post().to(update_sensor_calibration),
+        )
+        // Dosing Calibration
+        .route(
+            "/{device_id}/calibration/dosing",
+            web::get().to(get_dosing_calibration),
+        )
+        .route(
+            "/{device_id}/calibration/dosing",
+            web::post().to(update_dosing_calibration),
+        );
 }
+

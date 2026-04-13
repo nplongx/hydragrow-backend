@@ -22,16 +22,15 @@ pub struct BlockchainRecord {
 
 #[instrument(skip(pool))]
 pub async fn get_device_config(pool: &SqlitePool, device_id: &str) -> Result<DeviceConfig> {
-    let config = sqlx::query_as!(
-        DeviceConfig,
+    let config = sqlx::query_as::<_, DeviceConfig>(
         r#"SELECT
             device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
             temp_target, temp_tolerance, control_mode, is_enabled, 
             pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec,
             last_updated
         FROM device_config WHERE device_id = ?"#,
-        device_id
     )
+    .bind(device_id)
     .fetch_one(pool)
     .await
     .context(format!("Failed to fetch device_config for {}", device_id))?;
@@ -41,7 +40,7 @@ pub async fn get_device_config(pool: &SqlitePool, device_id: &str) -> Result<Dev
 
 #[instrument(skip(pool, config))]
 pub async fn upsert_device_config(pool: &SqlitePool, config: &DeviceConfig) -> Result<()> {
-    sqlx::query!(
+    sqlx::query(
         r#"
         INSERT INTO device_config (
             device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
@@ -62,20 +61,20 @@ pub async fn upsert_device_config(pool: &SqlitePool, config: &DeviceConfig) -> R
             delay_between_a_and_b_sec = excluded.delay_between_a_and_b_sec,   
             last_updated = excluded.last_updated
         "#,
-        config.device_id,
-        config.ec_target,
-        config.ec_tolerance,
-        config.ph_target,
-        config.ph_tolerance,
-        config.temp_target,
-        config.temp_tolerance,
-        config.control_mode,
-        config.is_enabled,
-        config.pump_a_capacity_ml_per_sec,
-        config.pump_b_capacity_ml_per_sec,
-        config.delay_between_a_and_b_sec,
-        config.last_updated
     )
+    .bind(&config.device_id)
+    .bind(config.ec_target)
+    .bind(config.ec_tolerance)
+    .bind(config.ph_target)
+    .bind(config.ph_tolerance)
+    .bind(config.temp_target)
+    .bind(config.temp_tolerance)
+    .bind(&config.control_mode)
+    .bind(config.is_enabled)
+    .bind(config.pump_a_capacity_ml_per_sec)
+    .bind(config.pump_b_capacity_ml_per_sec)
+    .bind(config.delay_between_a_and_b_sec)
+    .bind(&config.last_updated)
     .execute(pool)
     .await
     .context("Failed to upsert device_config")?;
@@ -87,8 +86,7 @@ pub async fn upsert_device_config(pool: &SqlitePool, config: &DeviceConfig) -> R
 
 #[instrument(skip(pool))]
 pub async fn get_safety_config(pool: &SqlitePool, device_id: &str) -> Result<SafetyConfig> {
-    let config = sqlx::query_as!(
-        SafetyConfig,
+    let config = sqlx::query_as::<_, SafetyConfig>(
         r#"
         SELECT
             device_id,
@@ -116,8 +114,8 @@ pub async fn get_safety_config(pool: &SqlitePool, device_id: &str) -> Result<Saf
         FROM safety_config
         WHERE device_id = ?
         "#,
-        device_id
     )
+    .bind(device_id)
     .fetch_one(pool)
     .await
     .context(format!("Failed to fetch safety_config for {}", device_id))?;
@@ -127,7 +125,7 @@ pub async fn get_safety_config(pool: &SqlitePool, device_id: &str) -> Result<Saf
 
 #[instrument(skip(pool, config))]
 pub async fn upsert_safety_config(pool: &SqlitePool, config: &SafetyConfig) -> Result<()> {
-    sqlx::query!(
+    sqlx::query(
         r#"
     INSERT INTO safety_config (
         device_id, 
@@ -162,29 +160,29 @@ pub async fn upsert_safety_config(pool: &SqlitePool, config: &SafetyConfig) -> R
         water_ack_threshold = excluded.water_ack_threshold,
         last_updated = excluded.last_updated
     "#,
-        config.device_id,
-        config.max_ec_limit,
-        config.min_ec_limit,
-        config.min_ph_limit,
-        config.max_ph_limit,
-        config.max_ec_delta,
-        config.max_ph_delta,
-        config.max_dose_per_cycle,
-        config.cooldown_sec,
-        config.max_dose_per_hour,
-        config.water_level_critical_min,
-        config.max_refill_cycles_per_hour,
-        config.max_drain_cycles_per_hour,
-        config.max_refill_duration_sec,
-        config.max_drain_duration_sec,
-        config.min_temp_limit,
-        config.max_temp_limit,
-        config.emergency_shutdown,
-        config.ec_ack_threshold,
-        config.ph_ack_threshold,
-        config.water_ack_threshold,
-        config.last_updated
     )
+    .bind(&config.device_id)
+    .bind(config.max_ec_limit)
+    .bind(config.min_ec_limit)
+    .bind(config.min_ph_limit)
+    .bind(config.max_ph_limit)
+    .bind(config.max_ec_delta)
+    .bind(config.max_ph_delta)
+    .bind(config.max_dose_per_cycle)
+    .bind(config.cooldown_sec)
+    .bind(config.max_dose_per_hour)
+    .bind(config.water_level_critical_min)
+    .bind(config.max_refill_cycles_per_hour)
+    .bind(config.max_drain_cycles_per_hour)
+    .bind(config.max_refill_duration_sec)
+    .bind(config.max_drain_duration_sec)
+    .bind(config.min_temp_limit)
+    .bind(config.max_temp_limit)
+    .bind(config.emergency_shutdown)
+    .bind(config.ec_ack_threshold)
+    .bind(config.ph_ack_threshold)
+    .bind(config.water_ack_threshold)
+    .bind(&config.last_updated)
     .execute(pool)
     .await?;
 
@@ -303,3 +301,4 @@ pub async fn end_active_crop_season(pool: &SqlitePool, device_id: &str) -> Resul
     .await?;
     Ok(())
 }
+
