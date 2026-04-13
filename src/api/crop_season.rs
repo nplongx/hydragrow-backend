@@ -1,10 +1,10 @@
 use crate::AppState;
 use crate::db::sqlite;
 use crate::models::crop_season::CreateCropSeasonRequest;
-use actix_web::{HttpResponse, Responder, get, post, put, web};
+use actix_web::{HttpResponse, Responder, web};
 use serde_json::json;
 
-#[get("/devices/{device_id}/seasons/active")]
+// handlers giữ nguyên
 async fn get_active_season(
     path: web::Path<String>,
     app_state: web::Data<AppState>,
@@ -17,7 +17,6 @@ async fn get_active_season(
     }
 }
 
-#[get("/devices/{device_id}/seasons")]
 async fn get_seasons_history(
     path: web::Path<String>,
     app_state: web::Data<AppState>,
@@ -30,7 +29,6 @@ async fn get_seasons_history(
     }
 }
 
-#[post("/devices/{device_id}/seasons")]
 async fn create_season(
     path: web::Path<String>,
     req: web::Json<CreateCropSeasonRequest>,
@@ -44,7 +42,6 @@ async fn create_season(
     }
 }
 
-#[put("/devices/{device_id}/seasons/active/end")]
 async fn end_season(path: web::Path<String>, app_state: web::Data<AppState>) -> impl Responder {
     let device_id = path.into_inner();
     match sqlite::end_active_crop_season(&app_state.sqlite_pool, &device_id).await {
@@ -56,13 +53,14 @@ async fn end_season(path: web::Path<String>, app_state: web::Data<AppState>) -> 
     }
 }
 
+// init_routes dạng mới
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api")
-            .service(get_active_season)
-            .service(get_seasons_history)
-            .service(create_season)
-            .service(end_season),
+        web::scope("/api/devices/{device_id}/seasons")
+            .route("/active", web::get().to(get_active_season))
+            .route("", web::get().to(get_seasons_history))
+            .route("", web::post().to(create_season))
+            .route("/active/end", web::put().to(end_season)),
     );
 }
 
