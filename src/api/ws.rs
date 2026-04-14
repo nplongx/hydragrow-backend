@@ -61,7 +61,6 @@ pub async fn ws_handler(
                 sensor_result = sensor_rx.recv() => {
                     match sensor_result {
                         Ok(sensor_data) => {
-                            // Cảm biến thì vẫn cần bọc lại do app_state.sensor_sender truyền struct thuần
                             let ws_msg = serde_json::json!({
                                 "type": "sensor_update",
                                 "payload": sensor_data
@@ -73,7 +72,13 @@ pub async fn ws_handler(
                                 }
                             }
                         }
-                        Err(_) => break,
+                        // THÊM ĐOẠN NÀY ĐỂ BỎ QUA LỖI LAGGED THAY VÌ BREAK
+                        Err(RecvError::Lagged(_)) => {
+                            warn!("WS Client {} is too slow, missed some sensor data", client_ip);
+                        }
+                        Err(RecvError::Closed) => {
+                            break;
+                        }
                     }
                 }
 
