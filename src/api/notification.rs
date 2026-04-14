@@ -26,8 +26,5 @@ pub async fn register_token(
 }
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.route(
-        "/api/notifications/register",
-        web::post().to(register_token),
-    );
+    cfg.route("/notifications/register", web::post().to(register_token));
 }

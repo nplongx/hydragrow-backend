@@ -147,10 +147,10 @@ pub async fn verify_transaction_onchain(
    ĐĂNG KÝ ROUTER
 ============================================================== */
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.route("/log", web::post().to(push_log_to_blockchain))
+    cfg.route("/blockchain/log", web::post().to(push_log_to_blockchain))
+        .route("/blockchain", web::get().to(get_device_blockchain_history))
         .route(
-            "/devices/{device_id}",
-            web::get().to(get_device_blockchain_history),
-        )
-        .route("/verify/{tx_id}", web::get().to(verify_transaction_onchain));
+            "/blockchain/verify/{tx_id}",
+            web::get().to(verify_transaction_onchain),
+        );
 }
