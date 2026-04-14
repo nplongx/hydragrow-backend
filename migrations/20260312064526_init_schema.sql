@@ -11,6 +11,12 @@ CREATE TABLE device_config (
     temp_tolerance REAL NOT NULL,
     control_mode TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1, -- 0: false, 1: true
+    
+    -- [CỘT MỚI BỔ SUNG]
+    pump_a_capacity_ml_per_sec REAL NOT NULL DEFAULT 1.2,
+    pump_b_capacity_ml_per_sec REAL NOT NULL DEFAULT 1.2,
+    delay_between_a_and_b_sec INTEGER NOT NULL DEFAULT 10,
+
     last_updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -61,6 +67,12 @@ CREATE TABLE dosing_calibration (
     soft_start_duration INTEGER NOT NULL DEFAULT 3000,
     scheduled_mixing_interval_sec INTEGER NOT NULL DEFAULT 3600,
     scheduled_mixing_duration_sec INTEGER NOT NULL DEFAULT 300,
+
+    -- [CỘT MỚI BỔ SUNG]
+    dosing_pwm_percent INTEGER NOT NULL DEFAULT 50,
+    osaka_mixing_pwm_percent INTEGER NOT NULL DEFAULT 60,
+    osaka_misting_pwm_percent INTEGER NOT NULL DEFAULT 100,
+
     last_calibrated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (device_id) REFERENCES device_config(device_id) ON DELETE CASCADE
 );
@@ -76,7 +88,6 @@ CREATE TABLE water_config (
     circulation_mode TEXT NOT NULL,
     circulation_on_sec INTEGER NOT NULL,
     circulation_off_sec INTEGER NOT NULL,
-
 
     water_level_tolerance REAL NOT NULL DEFAULT 1.0,
     auto_refill_enabled INTEGER NOT NULL DEFAULT 1,

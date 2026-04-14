@@ -52,6 +52,7 @@ pub async fn upsert_device_config(pool: &SqlitePool, config: &DeviceConfig) -> R
             ec_target = excluded.ec_target,
             ec_tolerance = excluded.ec_tolerance,
             ph_target = excluded.ph_target,
+            ph_tolerance = excluded.ph_tolerance,
             temp_target = excluded.temp_target,
             temp_tolerance = excluded.temp_tolerance,
             control_mode = excluded.control_mode,
@@ -301,4 +302,3 @@ pub async fn end_active_crop_season(pool: &SqlitePool, device_id: &str) -> Resul
     .await?;
     Ok(())
 }
-
