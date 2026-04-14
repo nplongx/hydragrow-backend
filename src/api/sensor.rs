@@ -82,6 +82,6 @@ pub async fn get_history(
 }
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
-    cfg.route("/latest", web::get().to(get_latest))
-        .route("/history", web::get().to(get_history));
+    cfg.route("/sensors/latest", web::get().to(get_latest))
+        .route("/sensors/history", web::get().to(get_history));
 }
