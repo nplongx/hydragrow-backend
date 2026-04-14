@@ -181,13 +181,13 @@ async fn main() -> anyhow::Result<()> {
             .service(
                 web::scope("/api")
                     .configure(api::notification::init_routes)
+                    .configure(api::solana::init_routes)
                     .service(
                         web::scope("/devices/{device_id}")
                             .configure(api::control::init_routes)
                             .configure(api::sensor::init_routes)
                             .configure(api::ws::init_routes)
                             .configure(api::config::init_routes)
-                            .configure(api::solana::init_routes)
                             .configure(api::crop_season::init_routes),
                     ),
             )
