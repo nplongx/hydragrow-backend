@@ -148,7 +148,10 @@ pub async fn verify_transaction_onchain(
 ============================================================== */
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/blockchain/log", web::post().to(push_log_to_blockchain))
-        .route("/blockchain", web::get().to(get_device_blockchain_history))
+        .route(
+            "/devices/{device_id}/blockchain",
+            web::get().to(get_device_blockchain_history),
+        )
         .route(
             "/blockchain/verify/{tx_id}",
             web::get().to(verify_transaction_onchain),
