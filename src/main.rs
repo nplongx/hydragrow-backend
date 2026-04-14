@@ -184,10 +184,9 @@ async fn main() -> anyhow::Result<()> {
                     .configure(api::sensor::init_routes)
                     .configure(api::ws::init_routes)
                     .configure(api::config::init_routes)
-                    .configure(api::solana::init_routes)
-                    .configure(api::notification::init_routes)
-                    .configure(api::crop_season::init_routes),
+                    .configure(api::solana::init_routes),
             )
+            .configure(api::notification::init_routes)
     })
     .bind((server_host, server_port))?
     .run()
