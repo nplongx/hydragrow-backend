@@ -179,14 +179,17 @@ async fn main() -> anyhow::Result<()> {
             .wrap(rate_limit_middleware)
             .wrap(auth_middleware)
             .service(
-                web::scope("/api/devices/{device_id}")
-                    .configure(api::control::init_routes)
-                    .configure(api::sensor::init_routes)
-                    .configure(api::ws::init_routes)
-                    .configure(api::config::init_routes)
-                    .configure(api::solana::init_routes),
+                web::scope("/api")
+                    .configure(api::notification::init_routes)
+                    .service(
+                        web::scope("/devices/{device_id}")
+                            .configure(api::control::init_routes)
+                            .configure(api::sensor::init_routes)
+                            .configure(api::ws::init_routes)
+                            .configure(api::config::init_routes)
+                            .configure(api::solana::init_routes),
+                    ),
             )
-            .configure(api::notification::init_routes)
     })
     .bind((server_host, server_port))?
     .run()
