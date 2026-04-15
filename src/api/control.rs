@@ -79,6 +79,7 @@ pub async fn control_pump(
         "off" => "pump_off",
         "reset_fault" => "reset_fault",
         "set_pwm" => "set_pwm",
+        "force_on" => "force_on",
         _ => "pump_off",
     };
 
