@@ -364,10 +364,11 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
             // 🟢 SỬA THÀNH ALERT MESSAGE ĐỂ BÁO VỀ UI REACT
             let alert = AlertMessage {
                 level: "success".to_string(),
-                title: "Ghi Blockchain Thành Công".to_string(),
+                title: "Châm Phân / Chỉnh pH Hoàn Tất".to_string(),
+                // 🟢 Đưa thẳng thông số ml vào message
                 message: format!(
-                    "Mẻ phân bón đã được lưu trữ vĩnh viễn trên Solana.\nTxID: {}",
-                    tx_id
+                    "Đã bơm: Phân A: {:.1}ml | Phân B: {:.1}ml | pH Up: {:.1}ml | pH Down: {:.1}ml\nTxID Solana: {}",
+                    report.pump_a_ml, report.pump_b_ml, report.ph_up_ml, report.ph_down_ml, tx_id
                 ),
                 device_id: device_id.clone(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,

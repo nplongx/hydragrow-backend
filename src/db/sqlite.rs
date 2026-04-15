@@ -302,3 +302,62 @@ pub async fn end_active_crop_season(pool: &SqlitePool, device_id: &str) -> Resul
     .await?;
     Ok(())
 }
+
+use crate::models::alert::AlertMessage;
+
+// Hàm chèn sự kiện vào CSDL
+pub async fn insert_system_event(
+    pool: &sqlx::SqlitePool,
+    alert: &AlertMessage,
+) -> Result<(), sqlx::Error> {
+    let ts = alert.timestamp as i64; // Ép kiểu u64 sang i64 cho SQLite
+    sqlx::query!(
+        r#"
+        INSERT INTO system_events (device_id, level, title, message, timestamp)
+        VALUES (?, ?, ?, ?, ?)
+        "#,
+        alert.device_id,
+        alert.level,
+        alert.title,
+        alert.message,
+        ts
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+// Hàm lấy 50 sự kiện gần nhất cho Frontend
+pub async fn get_system_events(
+    pool: &sqlx::SqlitePool,
+    device_id: &str,
+    limit: i64,
+) -> Result<Vec<AlertMessage>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT level, title, message, device_id, timestamp
+        FROM system_events
+        WHERE device_id = ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+        "#,
+        device_id,
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let events = rows
+        .into_iter()
+        .map(|r| AlertMessage {
+            level: r.level,
+            title: r.title,
+            message: r.message,
+            device_id: r.device_id,
+            timestamp: r.timestamp as u64,
+        })
+        .collect();
+
+    Ok(events)
+}

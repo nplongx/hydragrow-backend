@@ -1,3 +1,4 @@
+pub mod alert;
 pub mod config;
 pub mod control;
 pub mod crop_season;

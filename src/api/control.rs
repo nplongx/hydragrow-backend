@@ -109,6 +109,28 @@ pub async fn control_pump(
         mqtt_action, req_data.pump, req_data.pwm, req_data.duration_sec, device_id
     );
 
+    let action_vn = match req_data.action.as_str() {
+        "on" => "BẬT",
+        "off" => "TẮT",
+        "force_on" => "BẬT CƯỠNG CHẾ",
+        "set_pwm" => "ĐỔI CÔNG SUẤT",
+        "reset_fault" => "RESET LỖI",
+        _ => "ĐIỀU KHIỂN",
+    };
+
+    let alert_msg = crate::models::alert::AlertMessage {
+        level: "warning".to_string(), // Dùng màu Vàng (Warning) cho thao tác can thiệp thủ công
+        title: "Can Thiệp Thủ Công".to_string(),
+        message: format!(
+            "Lệnh: {} thiết bị [{}]\nBởi: Người dùng / Ứng dụng",
+            action_vn, req_data.pump
+        ),
+        device_id: device_id.clone(),
+        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+    };
+
+    let _ = app_state.alert_sender.send(alert_msg);
+
     HttpResponse::Ok().json(json!({"status": "success", "message": "Command sent"}))
 }
 

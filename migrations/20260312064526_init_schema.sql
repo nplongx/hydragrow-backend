@@ -162,6 +162,18 @@ CREATE TABLE IF NOT EXISTS blockchain_logs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS system_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    level TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    timestamp INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_events_device_id ON system_events(device_id);
+CREATE INDEX IF NOT EXISTS idx_system_events_timestamp ON system_events(timestamp DESC);
+
 -- Thêm cột season_id vào bảng lưu lịch sử blockchain (nếu bạn có bảng này trong DB)
 -- Hoặc chúng ta sẽ lọc (filter) dựa vào khoảng thời gian start_time -> end_time.
 

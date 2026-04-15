@@ -11,7 +11,10 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{
+    RwLock,
+    broadcast::{self, Receiver},
+};
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
@@ -106,6 +109,23 @@ async fn main() -> anyhow::Result<()> {
     let private_key: Vec<u8> = serde_json::from_str(&wallet_data).unwrap();
     let solana_service = SolanaTraceability::new("https://api.devnet.solana.com", &private_key);
     let (alert_sender, _) = broadcast::channel(100);
+
+    let mut alert_rx_for_db: Receiver<AlertMessage> = alert_sender.subscribe();
+    let db_pool_clone = sqlite_pool.clone(); // Giả sử db_pool là biến SqlitePool của bạn
+
+    tokio::spawn(async move {
+        while let Ok(alert) = alert_rx_for_db.recv().await {
+            // Không lưu các event FSM_UPDATE (vì nó spam 100ms/lần làm phình to DB)
+            // Chỉ lưu các cảnh báo (Error, Info, Warning, Dosing Report...)
+            if alert.level != "FSM_UPDATE" {
+                if let Err(e) = crate::db::sqlite::insert_system_event(&db_pool_clone, &alert).await
+                {
+                    tracing::error!("Lỗi ghi System Event vào DB: {:?}", e);
+                }
+            }
+        }
+    });
+
     // 🟢 THÊM: Khởi tạo kênh truyền dữ liệu Sensor
     let (sensor_sender, _) = broadcast::channel(100);
 
