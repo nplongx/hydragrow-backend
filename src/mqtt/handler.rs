@@ -183,6 +183,15 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
         Ok(json) => {
             // 🟢 3. Kiểm tra xem có trường "current_state" không
             if let Some(state) = json["current_state"].as_str() {
+                let fsm_sync_msg = AlertMessage {
+                    level: "FSM_UPDATE".to_string(),
+                    title: "FSM_SYNC".to_string(),
+                    message: state.to_string(), // Ví dụ: "SystemFault:SENSOR_DISCONNECTED"
+                    device_id: device_id.clone(),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                };
+                let _ = app_state.alert_sender.send(fsm_sync_msg);
+
                 let mut alert = None;
 
                 // 🟢 4. Phân tích chi tiết các trạng thái từ ESP32
