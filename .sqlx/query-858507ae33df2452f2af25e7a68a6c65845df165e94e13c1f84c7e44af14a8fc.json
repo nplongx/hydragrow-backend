@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT level, title, message, device_id, timestamp\n        FROM system_events\n        WHERE device_id = ?\n        ORDER BY timestamp DESC\n        LIMIT ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "level",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "message",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "device_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "timestamp",
+        "ordinal": 4,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "858507ae33df2452f2af25e7a68a6c65845df165e94e13c1f84c7e44af14a8fc"
+}

@@ -9,7 +9,7 @@ pub async fn fetch_events(
 ) -> impl Responder {
     let device_id = path.into_inner();
 
-    match get_system_events(&app_state.db_pool, &device_id, 50).await {
+    match get_system_events(&app_state.sqlite_pool, &device_id, 50).await {
         Ok(events) => HttpResponse::Ok().json(json!({ "status": "success", "data": events })),
         Err(e) => {
             tracing::error!("Lỗi lấy system_events: {:?}", e);
@@ -20,5 +20,5 @@ pub async fn fetch_events(
 
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     // Expose API cho Frontend
-    cfg.route("/devices/{device_id}/events", web::get().to(fetch_events));
+    cfg.route("/events", web::get().to(fetch_events));
 }
