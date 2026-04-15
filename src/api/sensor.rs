@@ -71,7 +71,6 @@ pub async fn get_history(
         |> range({}) 
         |> filter(fn: (r) => r["_measurement"] == "sensor_data")
         |> filter(fn: (r) => r.device_id == "{}")
-        |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         |> sort(columns: ["_time"], desc: false)
         |> limit(n: 1000)
         "#,
