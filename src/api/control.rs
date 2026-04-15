@@ -37,14 +37,21 @@ pub async fn control_pump(
 
     let valid_pumps = [
         "A",
+        "PUMP_A",
         "B",
+        "PUMP_B",
         "PH_UP",
         "PH_DOWN",
+        "OSAKA",
         "OSAKA_PUMP",
+        "MIST",
         "MIST_VALVE",
+        "WATER_PUMP_IN",
         "WATER_PUMP",
+        "PUMP_IN",
+        "WATER_PUMP_OUT",
         "DRAIN_PUMP",
-        // "CIRCULATION_PUMP", // 🟢 Bơm tuần hoàn điều khiển qua Tuya
+        "PUMP_OUT",
         "ALL",
     ];
 
@@ -53,7 +60,7 @@ pub async fn control_pump(
         return HttpResponse::BadRequest().json(json!({"error": "Invalid pump name"}));
     }
 
-    let valid_actions = ["on", "off", "reset_fault", "set_pwm"];
+    let valid_actions = ["on", "off", "reset_fault", "set_pwm", "force_on"];
     if !valid_actions.contains(&req_data.action.as_str()) {
         warn!("Từ chối lệnh: Hành động không hợp lệ ({})", req_data.action);
         return HttpResponse::BadRequest()
