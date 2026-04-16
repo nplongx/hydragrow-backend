@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::time::UNIX_EPOCH;
 
 use actix_web::web;
@@ -345,8 +346,15 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
         device_id, report.pump_a_ml, report.pump_b_ml
     );
 
+    let season_id_str =
+        match crate::db::sqlite::get_active_crop_season(&app_state.sqlite_pool, &device_id).await {
+            Ok(season) => season.unwrap().id.to_string(),
+            Err(_) => "".to_string(), // Nếu không có mùa vụ nào đang chạy, để trống
+        };
+
     let blockchain_payload = json!({
         "device_id": device_id,
+        "season_id": season_id_str,
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "dosing_data": report
     });
@@ -361,11 +369,28 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
         Ok(tx_id) => {
             info!("✅ Đã ghi lên Solana thành công! TxID: {}", tx_id);
 
-            // 🟢 SỬA THÀNH ALERT MESSAGE ĐỂ BÁO VỀ UI REACT
+            // 🟢 BƯỚC 3: LƯU VÀO DATABASE ĐỂ TRANG "NIÊM PHONG" CÓ THỂ ĐỌC ĐƯỢC
+            let action_str = format!(
+                "Châm phân tự động: A({:.1}ml), B({:.1}ml)",
+                report.pump_a_ml, report.pump_b_ml
+            );
+
+            if let Err(db_err) = crate::db::sqlite::insert_blockchain_tx(
+                &app_state.sqlite_pool,
+                &device_id,
+                &season_id_str,
+                &action_str,
+                &tx_id,
+            )
+            .await
+            {
+                error!("❌ Lỗi lưu TxID vào SQLite: {:?}", db_err);
+            }
+
+            // Gửi Alert lên Frontend (Đã có sẵn)
             let alert = AlertMessage {
                 level: "success".to_string(),
-                title: "Châm Phân / Chỉnh pH Hoàn Tất".to_string(),
-                // 🟢 Đưa thẳng thông số ml vào message
+                title: "Ghi Blockchain Thành Công".to_string(),
                 message: format!(
                     "Đã bơm: Phân A: {:.1}ml | Phân B: {:.1}ml | pH Up: {:.1}ml | pH Down: {:.1}ml\nTxID Solana: {}",
                     report.pump_a_ml, report.pump_b_ml, report.ph_up_ml, report.ph_down_ml, tx_id
