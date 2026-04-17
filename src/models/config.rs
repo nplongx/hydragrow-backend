@@ -15,7 +15,7 @@ pub struct DeviceConfig {
     pub is_enabled: bool,
     pub pump_a_capacity_ml_per_sec: f32,
     pub pump_b_capacity_ml_per_sec: f32,
-    pub delay_between_a_and_b_sec: i64,
+    pub delay_between_a_and_b_sec: i32, // Sửa từ i64 -> i32
     pub last_updated: String,
 }
 
@@ -28,9 +28,9 @@ pub struct SensorCalibration {
     pub ec_offset: f32,
     pub temp_offset: f32,
     pub temp_compensation_beta: f32,
-    pub sampling_interval: i64,
-    pub publish_interval: i64,
-    pub moving_average_window: i64,
+    pub sampling_interval: i32,     // Sửa từ i64 -> i32
+    pub publish_interval: i32,      // Sửa từ i64 -> i32
+    pub moving_average_window: i32, // Sửa từ i64 -> i32
     pub is_ph_enabled: bool,
     pub is_ec_enabled: bool,
     pub is_temp_enabled: bool,
@@ -56,19 +56,19 @@ pub struct DosingCalibration {
     pub ec_gain_per_ml: f32,
     pub ph_shift_up_per_ml: f32,
     pub ph_shift_down_per_ml: f32,
-    pub active_mixing_sec: i64,
-    pub sensor_stabilize_sec: i64,
+    pub active_mixing_sec: i32,    // Sửa từ i64 -> i32
+    pub sensor_stabilize_sec: i32, // Sửa từ i64 -> i32
     pub ec_step_ratio: f32,
     pub ph_step_ratio: f32,
     pub dosing_pump_capacity_ml_per_sec: f32,
-    pub soft_start_duration: i64,
+    pub soft_start_duration: i32, // Sửa từ i64 -> i32
     pub last_calibrated: String,
-    pub scheduled_mixing_interval_sec: i64,
-    pub scheduled_mixing_duration_sec: i64,
+    pub scheduled_mixing_interval_sec: i32, // Sửa từ i64 -> i32
+    pub scheduled_mixing_duration_sec: i32, // Sửa từ i64 -> i32
 
-    pub dosing_pwm_percent: i64,
-    pub osaka_mixing_pwm_percent: i64,
-    pub osaka_misting_pwm_percent: i64,
+    pub dosing_pwm_percent: i32,        // Sửa từ i64 -> i32
+    pub osaka_mixing_pwm_percent: i32,  // Sửa từ i64 -> i32
+    pub osaka_misting_pwm_percent: i32, // Sửa từ i64 -> i32
 }
 
 impl Default for DosingCalibration {
@@ -106,16 +106,16 @@ pub struct SafetyConfig {
     pub max_ec_delta: f32,
     pub max_ph_delta: f32,
     pub max_dose_per_cycle: f32,
-    pub cooldown_sec: i64,
+    pub cooldown_sec: i32, // Sửa từ i64 -> i32
     pub max_dose_per_hour: f32,
     pub water_level_critical_min: f32,
-    pub max_refill_cycles_per_hour: i64,
-    pub max_drain_cycles_per_hour: i64,
-    pub max_refill_duration_sec: i64,
-    pub max_drain_duration_sec: i64,
+    pub max_refill_cycles_per_hour: i32, // Sửa từ i64 -> i32
+    pub max_drain_cycles_per_hour: i32,  // Sửa từ i64 -> i32
+    pub max_refill_duration_sec: i32,    // Sửa từ i64 -> i32
+    pub max_drain_duration_sec: i32,     // Sửa từ i64 -> i32
     pub min_temp_limit: f32,
     pub max_temp_limit: f32,
-    pub emergency_shutdown: i64,
+    pub emergency_shutdown: bool, // Sửa từ i64 -> i32 (để an toàn, nếu DB là INT4)
     pub ec_ack_threshold: f32,
     pub ph_ack_threshold: f32,
     pub water_ack_threshold: f32,
@@ -142,7 +142,7 @@ impl Default for SafetyConfig {
             max_drain_duration_sec: 120,
             min_temp_limit: 15.0,
             max_temp_limit: 35.0,
-            emergency_shutdown: 0,
+            emergency_shutdown: false,
             ec_ack_threshold: 0.2,
             ph_ack_threshold: 0.2,
             water_ack_threshold: 1.0,
@@ -159,18 +159,18 @@ pub struct WaterConfig {
     pub water_level_max: f32,
     pub water_level_drain: f32,
     pub circulation_mode: String,
-    pub circulation_on_sec: i64,
-    pub circulation_off_sec: i64,
+    pub circulation_on_sec: i32,  // Sửa từ i64 -> i32
+    pub circulation_off_sec: i32, // Sửa từ i64 -> i32
     pub water_level_tolerance: f32,
     pub auto_refill_enabled: bool,
     pub auto_drain_overflow: bool,
     pub auto_dilute_enabled: bool,
     pub dilute_drain_amount_cm: f32,
     pub scheduled_water_change_enabled: bool,
-    pub water_change_interval_sec: i64,
+    pub water_change_interval_sec: i32, // Sửa từ i64 -> i32
     pub scheduled_drain_amount_cm: f32,
-    pub misting_on_duration_ms: i64,
-    pub misting_off_duration_ms: i64,
+    pub misting_on_duration_ms: i32,  // Sửa từ i64 -> i32
+    pub misting_off_duration_ms: i32, // Sửa từ i64 -> i32
     pub last_updated: String,
 }
 
@@ -225,10 +225,10 @@ pub struct MqttConfigPayload {
     pub auto_dilute_enabled: bool,
     pub dilute_drain_amount_cm: f32,
     pub scheduled_water_change_enabled: bool,
-    pub water_change_interval_sec: u64,
+    pub water_change_interval_sec: u32, // MQTT payload: i32 -> u32
     pub scheduled_drain_amount_cm: f32,
-    pub misting_on_duration_ms: u64,
-    pub misting_off_duration_ms: u64,
+    pub misting_on_duration_ms: u32,
+    pub misting_off_duration_ms: u32,
 
     // An toàn
     pub emergency_shutdown: bool,
@@ -240,8 +240,8 @@ pub struct MqttConfigPayload {
     pub max_ph_delta: f32,
     pub max_dose_per_cycle: f32,
     pub water_level_critical_min: f32,
-    pub max_refill_duration_sec: u64,
-    pub max_drain_duration_sec: u64,
+    pub max_refill_duration_sec: u32,
+    pub max_drain_duration_sec: u32,
     pub ec_ack_threshold: f32,
     pub ph_ack_threshold: f32,
     pub water_ack_threshold: f32,
@@ -250,14 +250,14 @@ pub struct MqttConfigPayload {
     pub ec_gain_per_ml: f32,
     pub ph_shift_up_per_ml: f32,
     pub ph_shift_down_per_ml: f32,
-    pub active_mixing_sec: u64,
-    pub sensor_stabilize_sec: u64,
+    pub active_mixing_sec: u32,
+    pub sensor_stabilize_sec: u32,
     pub ec_step_ratio: f32,
     pub ph_step_ratio: f32,
     pub dosing_pump_capacity_ml_per_sec: f32,
-    pub soft_start_duration: u64,
-    pub scheduled_mixing_interval_sec: u64,
-    pub scheduled_mixing_duration_sec: u64,
+    pub soft_start_duration: u32,
+    pub scheduled_mixing_interval_sec: u32,
+    pub scheduled_mixing_duration_sec: u32,
 
     // Cảm biến
     pub ph_v7: f32,
@@ -266,8 +266,8 @@ pub struct MqttConfigPayload {
     pub ec_offset: f32,
     pub temp_offset: f32,
     pub temp_compensation_beta: f32,
-    pub sampling_interval: u64,
-    pub publish_interval: u64,
+    pub sampling_interval: u32,
+    pub publish_interval: u32,
     pub moving_average_window: u32,
 
     // Cờ Hardware (Map từ is_xxx_enabled của SensorCalibration)
@@ -282,8 +282,7 @@ pub struct MqttConfigPayload {
 }
 
 impl MqttConfigPayload {
-    /// Hàm gom 5 bảng DB thành 1 cục JSON phẳng duy nhất,
-    /// ép kiểu i64 -> bool chuẩn xác cho ESP32 đọc.
+    /// Hàm gom 5 bảng DB thành 1 cục JSON phẳng duy nhất
     pub fn from_db_rows(
         dev: &DeviceConfig,
         water: &WaterConfig,
@@ -294,7 +293,7 @@ impl MqttConfigPayload {
         Self {
             device_id: dev.device_id.clone(),
             control_mode: dev.control_mode.clone(),
-            is_enabled: dev.is_enabled, // DB bool -> MQTT bool
+            is_enabled: dev.is_enabled,
 
             ec_target: dev.ec_target,
             ec_tolerance: dev.ec_tolerance,
@@ -310,12 +309,12 @@ impl MqttConfigPayload {
             auto_dilute_enabled: water.auto_dilute_enabled,
             dilute_drain_amount_cm: water.dilute_drain_amount_cm,
             scheduled_water_change_enabled: water.scheduled_water_change_enabled,
-            water_change_interval_sec: water.water_change_interval_sec as u64,
+            water_change_interval_sec: water.water_change_interval_sec as u32,
             scheduled_drain_amount_cm: water.scheduled_drain_amount_cm,
-            misting_on_duration_ms: water.misting_on_duration_ms as u64,
-            misting_off_duration_ms: water.misting_off_duration_ms as u64,
+            misting_on_duration_ms: water.misting_on_duration_ms as u32,
+            misting_off_duration_ms: water.misting_off_duration_ms as u32,
 
-            emergency_shutdown: safe.emergency_shutdown != 0,
+            emergency_shutdown: safe.emergency_shutdown,
             max_ec_limit: safe.max_ec_limit,
             min_ec_limit: safe.min_ec_limit,
             min_ph_limit: safe.min_ph_limit,
@@ -324,8 +323,8 @@ impl MqttConfigPayload {
             max_ph_delta: safe.max_ph_delta,
             max_dose_per_cycle: safe.max_dose_per_cycle,
             water_level_critical_min: safe.water_level_critical_min,
-            max_refill_duration_sec: safe.max_refill_duration_sec as u64,
-            max_drain_duration_sec: safe.max_drain_duration_sec as u64,
+            max_refill_duration_sec: safe.max_refill_duration_sec as u32,
+            max_drain_duration_sec: safe.max_drain_duration_sec as u32,
             ec_ack_threshold: safe.ec_ack_threshold,
             ph_ack_threshold: safe.ph_ack_threshold,
             water_ack_threshold: safe.water_ack_threshold,
@@ -333,14 +332,14 @@ impl MqttConfigPayload {
             ec_gain_per_ml: dose.ec_gain_per_ml,
             ph_shift_up_per_ml: dose.ph_shift_up_per_ml,
             ph_shift_down_per_ml: dose.ph_shift_down_per_ml,
-            active_mixing_sec: dose.active_mixing_sec as u64,
-            sensor_stabilize_sec: dose.sensor_stabilize_sec as u64,
+            active_mixing_sec: dose.active_mixing_sec as u32,
+            sensor_stabilize_sec: dose.sensor_stabilize_sec as u32,
             ec_step_ratio: dose.ec_step_ratio,
             ph_step_ratio: dose.ph_step_ratio,
             dosing_pump_capacity_ml_per_sec: dose.dosing_pump_capacity_ml_per_sec,
-            soft_start_duration: dose.soft_start_duration as u64,
-            scheduled_mixing_interval_sec: dose.scheduled_mixing_interval_sec as u64,
-            scheduled_mixing_duration_sec: dose.scheduled_mixing_duration_sec as u64,
+            soft_start_duration: dose.soft_start_duration as u32,
+            scheduled_mixing_interval_sec: dose.scheduled_mixing_interval_sec as u32,
+            scheduled_mixing_duration_sec: dose.scheduled_mixing_duration_sec as u32,
 
             ph_v7: sens.ph_v7,
             ph_v4: sens.ph_v4,
@@ -348,8 +347,8 @@ impl MqttConfigPayload {
             ec_offset: sens.ec_offset,
             temp_offset: sens.temp_offset,
             temp_compensation_beta: sens.temp_compensation_beta,
-            sampling_interval: sens.sampling_interval as u64,
-            publish_interval: sens.publish_interval as u64,
+            sampling_interval: sens.sampling_interval as u32,
+            publish_interval: sens.publish_interval as u32,
             moving_average_window: sens.moving_average_window as u32,
 
             enable_ec_sensor: sens.is_ec_enabled,
@@ -363,4 +362,3 @@ impl MqttConfigPayload {
         }
     }
 }
-
