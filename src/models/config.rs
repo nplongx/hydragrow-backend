@@ -70,6 +70,11 @@ pub struct DosingCalibration {
     pub dosing_pwm_percent: i32,
     pub osaka_mixing_pwm_percent: i32,
     pub osaka_misting_pwm_percent: i32,
+
+    pub scheduled_dosing_enabled: bool,
+    pub scheduled_dosing_interval_sec: i32,
+    pub scheduled_dose_a_ml: f32,
+    pub scheduled_dose_b_ml: f32,
 }
 
 impl Default for DosingCalibration {
@@ -93,6 +98,11 @@ impl Default for DosingCalibration {
             dosing_pwm_percent: 50,
             osaka_mixing_pwm_percent: 60,
             osaka_misting_pwm_percent: 100,
+
+            scheduled_dosing_enabled: false,
+            scheduled_dosing_interval_sec: 86400,
+            scheduled_dose_a_ml: 10.0,
+            scheduled_dose_b_ml: 10.0,
         }
     }
 }
@@ -267,6 +277,10 @@ pub struct MqttConfigPayload {
     pub dosing_pwm_percent: u32,
     pub osaka_mixing_pwm_percent: u32,
     pub osaka_misting_pwm_percent: u32,
+    pub scheduled_dosing_enabled: bool,
+    pub scheduled_dosing_interval_sec: u32, // 1 Ngày
+    pub scheduled_dose_a_ml: f32,
+    pub scheduled_dose_b_ml: f32,
 }
 
 impl MqttConfigPayload {
@@ -339,7 +353,10 @@ impl MqttConfigPayload {
             dosing_pwm_percent: dose.dosing_pwm_percent as u32,
             osaka_mixing_pwm_percent: dose.osaka_mixing_pwm_percent as u32,
             osaka_misting_pwm_percent: dose.osaka_misting_pwm_percent as u32,
+            scheduled_dosing_enabled: dose.scheduled_dosing_enabled,
+            scheduled_dosing_interval_sec: dose.scheduled_dosing_interval_sec as u32,
+            scheduled_dose_a_ml: dose.scheduled_dose_a_ml,
+            scheduled_dose_b_ml: dose.scheduled_dose_b_ml,
         }
     }
 }
-
