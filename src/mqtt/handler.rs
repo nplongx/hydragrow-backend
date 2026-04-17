@@ -347,7 +347,7 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
     );
 
     let season_id_str =
-        match crate::db::sqlite::get_active_crop_season(&app_state.sqlite_pool, &device_id).await {
+        match crate::db::postgres::get_active_crop_season(&app_state.pg_pool, &device_id).await {
             Ok(season) => season.unwrap().id.to_string(),
             Err(_) => "".to_string(), // Nếu không có mùa vụ nào đang chạy, để trống
         };
@@ -375,8 +375,8 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
                 report.pump_a_ml, report.pump_b_ml
             );
 
-            if let Err(db_err) = crate::db::sqlite::insert_blockchain_tx(
-                &app_state.sqlite_pool,
+            if let Err(db_err) = crate::db::postgres::insert_blockchain_tx(
+                &app_state.pg_pool,
                 &device_id,
                 &season_id_str,
                 &action_str,

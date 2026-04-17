@@ -4,7 +4,7 @@ use serde_json::json;
 use tracing::{error, info, instrument};
 
 use crate::AppState;
-use crate::db::sqlite::{
+use crate::db::postgres::{
     get_device_blockchain_history as fetch_history_from_db, insert_blockchain_tx,
 };
 
@@ -53,7 +53,7 @@ pub async fn push_log_to_blockchain(
 
             // 2. LƯU LẠI VÀO CƠ SỞ DỮ LIỆU SQLITE (Kèm theo season_id)
             if let Err(e) = insert_blockchain_tx(
-                &app_state.sqlite_pool,
+                &app_state.pg_pool,
                 &log_data.device_id,
                 &log_data.season_id, // 🟢 Đẩy season_id xuống Database
                 &log_data.action,
@@ -101,7 +101,7 @@ pub async fn get_device_blockchain_history(
     );
 
     // KÉO DỮ LIỆU THẬT TỪ SQLITE (Truyền thêm bộ lọc season)
-    match fetch_history_from_db(&app_state.sqlite_pool, &device_id, season_filter).await {
+    match fetch_history_from_db(&app_state.pg_pool, &device_id, season_filter).await {
         Ok(history) => HttpResponse::Ok().json(json!({
             "status": "success",
             "data": history

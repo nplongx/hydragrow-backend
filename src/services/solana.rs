@@ -21,7 +21,7 @@ impl SolanaTraceability {
         let client =
             RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
 
-        let keypair = Keypair::from_bytes(private_key_bytes)
+        let keypair = Keypair::try_from(private_key_bytes)
             .expect("Lỗi: Không thể khởi tạo Ví Solana từ Private Key cung cấp!");
 
         Self {

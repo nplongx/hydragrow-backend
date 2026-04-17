@@ -1,12 +1,12 @@
 use thiserror::Error;
 
 pub mod influx;
-pub mod sqlite;
+pub mod postgres; // Đổi từ sqlite -> postgres
 
 #[derive(Error, Debug)]
 pub enum DbError {
-    #[error("SQLite query failed: {0}")]
-    SqliteError(#[from] sqlx::Error),
+    #[error("PostgreSQL query failed: {0}")]
+    PostgresError(#[from] sqlx::Error), // Đổi tên từ SqliteError
 
     #[error("InfluxDB operation failed: {0}")]
     InfluxError(#[from] influxdb2::BuildError),
@@ -18,5 +18,5 @@ pub enum DbError {
     ParseError(String),
 }
 
-// Result type alias gọn nhẹ cho module DB
 pub type DbResult<T> = Result<T, DbError>;
+

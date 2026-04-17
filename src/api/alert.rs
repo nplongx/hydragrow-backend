@@ -1,5 +1,4 @@
-use crate::AppState;
-use crate::db::sqlite::get_system_events;
+use crate::{AppState, db::postgres::get_system_events};
 use actix_web::{HttpResponse, Responder, web};
 use serde_json::json;
 
@@ -9,7 +8,7 @@ pub async fn fetch_events(
 ) -> impl Responder {
     let device_id = path.into_inner();
 
-    match get_system_events(&app_state.sqlite_pool, &device_id, 50).await {
+    match get_system_events(&app_state.pg_pool, &device_id, 50).await {
         Ok(events) => HttpResponse::Ok().json(json!({ "status": "success", "data": events })),
         Err(e) => {
             tracing::error!("Lỗi lấy system_events: {:?}", e);

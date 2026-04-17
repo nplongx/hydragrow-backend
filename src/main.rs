@@ -1,10 +1,10 @@
 use actix_web::{App, HttpServer, web};
 use anyhow::Context;
 use dotenvy::dotenv;
-use influxdb2::Client as InfluxClient; // 🟢 QUAY LẠI DÙNG INFLUXDB2
+use influxdb2::Client as InfluxClient;
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde::Serialize;
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::postgres::PgPoolOptions; // 🟢 ĐỔI TỪ SqlitePoolOptions
 use std::{
     collections::HashMap,
     env, fs,
@@ -28,19 +28,9 @@ pub mod db;
 pub mod models;
 pub mod mqtt;
 pub mod services;
-//
-// #[derive(Serialize)]
-// pub struct AlertMessage {
-//     pub alert_type: String,
-//     pub device_id: String,
-//     pub metric: String,
-//     pub value: f64,
-//     pub severity: String,
-//     pub timestamp: String,
-// }
 
 pub struct AppState {
-    pub sqlite_pool: sqlx::SqlitePool,
+    pub pg_pool: sqlx::PgPool, // 🟢 ĐỔI TỪ sqlite_pool THÀNH pg_pool
     pub influx_client: InfluxClient,
     pub influx_bucket: String,
     pub mqtt_client: AsyncClient,
@@ -49,7 +39,6 @@ pub struct AppState {
     pub device_states: std::sync::Arc<RwLock<HashMap<String, String>>>,
     pub solana_traceability: SolanaTraceability,
     pub sensor_sender: broadcast::Sender<SensorData>,
-
     pub fcm_tokens: Mutex<Vec<String>>,
 }
 
@@ -65,12 +54,12 @@ async fn main() -> anyhow::Result<()> {
     info!("Bắt đầu khởi động hệ thống IoT Hydroponics...");
 
     let database_url = env::var("DATABASE_URL").expect("Thiếu biến DATABASE_URL");
-    let sqlite_pool = SqlitePoolOptions::new()
+    // 🟢 SỬ DỤNG PgPoolOptions
+    let pg_pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
         .await?;
 
-    // 🟢 KHỞI TẠO INFLUXDB2 CHO CLOUD
     let influx_url = env::var("INFLUX_URL").expect("Thiếu biến INFLUX_URL");
     let influx_org = env::var("INFLUX_ORG").expect("Thiếu biến INFLUX_ORG");
     let influx_token = env::var("INFLUX_TOKEN").expect("Thiếu biến INFLUX_TOKEN");
@@ -89,18 +78,12 @@ async fn main() -> anyhow::Result<()> {
     mqttoptions.set_keep_alive(Duration::from_secs(30));
     mqttoptions.set_clean_session(false);
 
-    // ==========================================
-    // 🟢 ĐÃ THÊM: XÁC THỰC USERNAME/PASSWORD CHO MQTT
-    // ==========================================
     let mqtt_user = env::var("MQTT_USER").unwrap_or_default();
     let mqtt_pass = env::var("MQTT_PASSWORD").unwrap_or_default();
     if !mqtt_user.is_empty() && !mqtt_pass.is_empty() {
         mqttoptions.set_credentials(&mqtt_user, mqtt_pass);
         info!("Đã cấu hình xác thực MQTT với user: {}", mqtt_user);
-    } else {
-        info!("Cảnh báo: Không tìm thấy MQTT_USER/MQTT_PASSWORD trong .env, kết nối ẩn danh.");
     }
-    // ==========================================
 
     let (mqtt_client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
@@ -108,17 +91,18 @@ async fn main() -> anyhow::Result<()> {
         fs::read_to_string("server_wallet.json").expect("Không tìm thấy server_wallet.json");
     let private_key: Vec<u8> = serde_json::from_str(&wallet_data).unwrap();
     let solana_service = SolanaTraceability::new("https://api.devnet.solana.com", &private_key);
-    let (alert_sender, _) = broadcast::channel(100);
 
+    let (alert_sender, _) = broadcast::channel(100);
     let mut alert_rx_for_db: Receiver<AlertMessage> = alert_sender.subscribe();
-    let db_pool_clone = sqlite_pool.clone(); // Giả sử db_pool là biến SqlitePool của bạn
+
+    let db_pool_clone = pg_pool.clone(); // 🟢 SỬ DỤNG pg_pool
 
     tokio::spawn(async move {
         while let Ok(alert) = alert_rx_for_db.recv().await {
-            // Không lưu các event FSM_UPDATE (vì nó spam 100ms/lần làm phình to DB)
-            // Chỉ lưu các cảnh báo (Error, Info, Warning, Dosing Report...)
             if alert.level != "FSM_UPDATE" {
-                if let Err(e) = crate::db::sqlite::insert_system_event(&db_pool_clone, &alert).await
+                // 🟢 GỌI VÀO postgres THAY VÌ sqlite
+                if let Err(e) =
+                    crate::db::postgres::insert_system_event(&db_pool_clone, &alert).await
                 {
                     tracing::error!("Lỗi ghi System Event vào DB: {:?}", e);
                 }
@@ -126,14 +110,12 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // 🟢 THÊM: Khởi tạo kênh truyền dữ liệu Sensor
     let (sensor_sender, _) = broadcast::channel(100);
-
     let api_key = std::env::var("API_KEY").context("API_KEY must be set in .env")?;
     let device_states = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
     let app_state = web::Data::new(AppState {
-        sqlite_pool,
+        pg_pool, // 🟢 ĐƯA pg_pool VÀO APPSTATE
         influx_client,
         influx_bucket,
         mqtt_client: mqtt_client.clone(),
@@ -141,7 +123,6 @@ async fn main() -> anyhow::Result<()> {
         api_key,
         device_states,
         solana_traceability: solana_service,
-        // 🟢 THÊM: Đưa kênh sensor vào AppState
         sensor_sender,
         fcm_tokens: Mutex::new(Vec::new()),
     });
@@ -149,19 +130,19 @@ async fn main() -> anyhow::Result<()> {
     mqtt_client
         .subscribe("AGITECH/+/sensors", QoS::AtMostOnce)
         .await
-        .expect("Lỗi sub sensors");
+        .expect("Lỗi sub");
     mqtt_client
         .subscribe("AGITECH/+/status", QoS::AtLeastOnce)
         .await
-        .expect("Lỗi sub status");
+        .expect("Lỗi sub");
     mqtt_client
         .subscribe("AGITECH/+/fsm", QoS::AtLeastOnce)
         .await
-        .expect("Lỗi sub fsm");
+        .expect("Lỗi sub");
     mqtt_client
         .subscribe("AGITECH/+/dosing_report", QoS::AtLeastOnce)
         .await
-        .expect("Lỗi sub dosing_report");
+        .expect("Lỗi sub");
 
     let app_state_for_mqtt = app_state.clone();
     tokio::spawn(async move {
@@ -219,3 +200,4 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+

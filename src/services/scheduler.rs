@@ -1,4 +1,5 @@
 use actix_web::web;
+use sqlx::Row; // Thêm thư viện Row để map dữ liệu
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
 use tracing::{error, info, instrument, warn};
@@ -22,26 +23,27 @@ pub async fn start_tuya_scheduler(app_state: web::Data<AppState>, target_device_
             ticker.tick().await;
 
             // ==========================================
-            // 1. ĐỌC CẤU HÌNH TỪ SQLITE (Real-time)
+            // 1. ĐỌC CẤU HÌNH TỪ POSTGRES (Real-time)
             // ==========================================
-            // Query trực tiếp để luôn lấy cấu hình mới nhất nếu Frontend vừa đổi
-            let config_result = sqlx::query!(
+            // Dùng sqlx::query thay vì query! để tránh check compile-time
+            // Đổi `?` thành `$1` cho Postgres
+            let config_result = sqlx::query(
                 r#"
                 SELECT circulation_mode, circulation_on_sec, circulation_off_sec 
                 FROM water_config 
-                WHERE device_id = ?
+                WHERE device_id = $1
                 "#,
-                target_device_id
             )
-            .fetch_optional(&app_state.sqlite_pool)
+            .bind(&target_device_id)
+            .fetch_optional(&app_state.pg_pool) // Đã đổi sang pg_pool
             .await;
 
             // Xử lý default values nếu DB chưa có dữ liệu
             let (mode, on_sec, off_sec) = match config_result {
                 Ok(Some(row)) => (
-                    row.circulation_mode,
-                    row.circulation_on_sec,  // Mặc định 15p
-                    row.circulation_off_sec, // Mặc định 45p
+                    row.get::<String, _>("circulation_mode"),
+                    row.get::<i32, _>("circulation_on_sec") as i64, // Ép i32 của DB sang i64
+                    row.get::<i32, _>("circulation_off_sec") as i64,
                 ),
                 _ => ("auto".to_string(), 900, 2700), // Fallback an toàn
             };
@@ -109,3 +111,4 @@ pub async fn start_tuya_scheduler(app_state: web::Data<AppState>, target_device_
         }
     });
 }
+

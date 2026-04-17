@@ -1,6 +1,6 @@
-use crate::AppState;
-use crate::db::sqlite;
+use crate::db::postgres; // 🟢 ĐỔI sqlite THÀNH postgres
 use crate::models::crop_season::CreateCropSeasonRequest;
+use crate::{AppState, db::postgres::end_active_crop_season};
 use actix_web::{HttpResponse, Responder, web};
 use serde_json::json;
 
@@ -11,13 +11,13 @@ pub struct UpdateCropSeasonRequest {
     pub description: Option<String>,
 }
 
-// handlers giữ nguyên
 async fn get_active_season(
     path: web::Path<String>,
     app_state: web::Data<AppState>,
 ) -> impl Responder {
     let device_id = path.into_inner();
-    match sqlite::get_active_crop_season(&app_state.sqlite_pool, &device_id).await {
+    match postgres::get_active_crop_season(&app_state.pg_pool, &device_id).await {
+        // 🟢 pg_pool
         Ok(season) => HttpResponse::Ok().json(json!({ "status": "success", "data": season })),
         Err(e) => HttpResponse::InternalServerError()
             .json(json!({ "status": "error", "message": e.to_string() })),
@@ -29,7 +29,8 @@ async fn get_seasons_history(
     app_state: web::Data<AppState>,
 ) -> impl Responder {
     let device_id = path.into_inner();
-    match sqlite::get_crop_seasons_history(&app_state.sqlite_pool, &device_id).await {
+    match postgres::get_crop_seasons_history(&app_state.pg_pool, &device_id).await {
+        // 🟢 pg_pool
         Ok(seasons) => HttpResponse::Ok().json(json!({ "status": "success", "data": seasons })),
         Err(e) => HttpResponse::InternalServerError()
             .json(json!({ "status": "error", "message": e.to_string() })),
@@ -42,7 +43,8 @@ async fn create_season(
     app_state: web::Data<AppState>,
 ) -> impl Responder {
     let device_id = path.into_inner();
-    match sqlite::create_crop_season(&app_state.sqlite_pool, &device_id, req.into_inner()).await {
+    match postgres::create_crop_season(&app_state.pg_pool, &device_id, req.into_inner()).await {
+        // 🟢 pg_pool
         Ok(season) => HttpResponse::Ok().json(json!({ "status": "success", "data": season })),
         Err(e) => HttpResponse::InternalServerError()
             .json(json!({ "status": "error", "message": e.to_string() })),
@@ -57,8 +59,8 @@ async fn update_season(
     let device_id = path.into_inner();
     let data = req.into_inner();
 
-    match sqlite::update_active_crop_season(
-        &app_state.sqlite_pool,
+    match postgres::update_active_crop_season(
+        &app_state.pg_pool, // 🟢 pg_pool
         &device_id,
         &data.name,
         data.plant_type.as_deref(),
@@ -77,12 +79,13 @@ async fn update_season(
 
 async fn end_season(path: web::Path<String>, app_state: web::Data<AppState>) -> impl Responder {
     let device_id = path.into_inner();
-    match sqlite::end_active_crop_season(&app_state.sqlite_pool, &device_id).await {
+    match end_active_crop_season(&app_state.pg_pool, &device_id).await {
+        // 🟢 pg_pool
         Ok(_) => {
             HttpResponse::Ok().json(json!({ "status": "success", "message": "Đã kết thúc mùa vụ" }))
         }
         Err(e) => HttpResponse::InternalServerError()
-            .json(json!({ "status": "error", "message": e.to_string() })),
+            .json(json!({ "status": "error", "message": format!("{}", e) })),
     }
 }
 
