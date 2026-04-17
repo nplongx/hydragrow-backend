@@ -15,10 +15,10 @@ use crate::models::config::{
 // ==========================================
 
 async fn fetch_unified_mqtt_config(
-    pool: &sqlx::PgPool, // 🟢 SỬA SqlitePool -> PgPool
+    pool: &sqlx::PgPool,
     device_id: &str,
 ) -> Result<MqttConfigPayload, String> {
-    let dev = sqlx::query_as::<_, DeviceConfig>("SELECT * FROM device_config WHERE device_id = $1") // 🟢 ? -> $1
+    let dev = sqlx::query_as::<_, DeviceConfig>("SELECT * FROM device_config WHERE device_id = $1")
         .bind(device_id)
         .fetch_optional(pool)
         .await
@@ -80,11 +80,11 @@ async fn fetch_unified_mqtt_config(
         sampling_interval: 1000,
         publish_interval: 5000,
         moving_average_window: 10,
-        is_ph_enabled: true, // 🟢 Lưu ý bool nếu DB là bool
+        is_ph_enabled: true,
         is_ec_enabled: true,
         is_temp_enabled: true,
         is_water_level_enabled: true,
-        last_calibrated: String::new(),
+        last_calibrated: Utc::now(),
     });
 
     Ok(MqttConfigPayload::from_db_rows(
@@ -96,7 +96,7 @@ pub async fn sync_config_to_esp32(
     app_state: &web::Data<AppState>,
     device_id: &str,
 ) -> Result<(), String> {
-    let payload = fetch_unified_mqtt_config(&app_state.pg_pool, device_id).await?; // 🟢 app_state.pg_pool
+    let payload = fetch_unified_mqtt_config(&app_state.pg_pool, device_id).await?;
     let mqtt_topic = format!("AGITECH/{}/controller/config", device_id);
     let mqtt_bytes =
         serde_json::to_vec(&payload).map_err(|e| format!("Lỗi serialize payload: {:?}", e))?;
@@ -117,7 +117,7 @@ pub async fn sync_config_to_esp32(
 async fn upsert_water_db(
     pool: &sqlx::PgPool,
     config: &WaterConfig,
-    now: &str,
+    now: &chrono::DateTime<chrono::Utc>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
@@ -177,7 +177,7 @@ async fn upsert_water_db(
 async fn upsert_sensor_db(
     pool: &sqlx::PgPool,
     cal: &SensorCalibration,
-    now: &str,
+    now: &chrono::DateTime<chrono::Utc>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
@@ -218,7 +218,7 @@ async fn upsert_sensor_db(
 async fn upsert_dosing_db(
     pool: &sqlx::PgPool,
     cal: &DosingCalibration,
-    now: &str,
+    now: &chrono::DateTime<chrono::Utc>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
@@ -279,14 +279,13 @@ pub async fn update_unified_config(
 ) -> impl Responder {
     let device_id = path.into_inner();
     let mut payload = req.into_inner();
-    let now = Utc::now().to_rfc3339();
+    let now = Utc::now();
 
     payload.device_config.device_id = device_id.clone();
-    payload.device_config.last_updated = now.clone();
+    payload.device_config.last_updated = now;
     if let Err(e) =
         crate::db::postgres::upsert_device_config(&app_state.pg_pool, &payload.device_config).await
     {
-        // 🟢 postgres
         error!("Failed to update device config: {:?}", e);
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error: Device"}));
     }
@@ -296,7 +295,6 @@ pub async fn update_unified_config(
     if let Err(e) =
         crate::db::postgres::upsert_safety_config(&app_state.pg_pool, &payload.safety_config).await
     {
-        // 🟢 postgres
         error!("Failed to update safety config: {:?}", e);
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error: Safety"}));
     }
@@ -346,7 +344,6 @@ pub async fn get_unified_device_config(
 pub async fn get_config(path: web::Path<String>, app_state: web::Data<AppState>) -> impl Responder {
     let device_id = path.into_inner();
     match crate::db::postgres::get_device_config(&app_state.pg_pool, &device_id).await {
-        // 🟢 postgres
         Ok(config) => HttpResponse::Ok().json(config),
         Err(e) => {
             tracing::warn!("Config not found or DB error: {:?}", e);
@@ -364,9 +361,8 @@ pub async fn update_config(
     let device_id = path.into_inner();
     let mut config = payload.into_inner();
     config.device_id = device_id.clone();
-    config.last_updated = Utc::now().to_rfc3339();
+    config.last_updated = Utc::now();
     if let Err(e) = crate::db::postgres::upsert_device_config(&app_state.pg_pool, &config).await {
-        // 🟢 postgres
         error!("Failed to update base config in DB: {:?}", e);
         return HttpResponse::InternalServerError()
             .json(json!({"error": "Failed to save configuration"}));
@@ -382,7 +378,7 @@ pub async fn get_water_config(
 ) -> impl Responder {
     let device_id = path.into_inner();
     let result =
-        sqlx::query_as::<_, WaterConfig>("SELECT * FROM water_config WHERE device_id = $1") // 🟢 $1
+        sqlx::query_as::<_, WaterConfig>("SELECT * FROM water_config WHERE device_id = $1")
             .bind(device_id)
             .fetch_optional(&app_state.pg_pool)
             .await;
@@ -401,7 +397,7 @@ pub async fn update_water_config(
 ) -> impl Responder {
     let device_id = path.into_inner();
     let config = req.into_inner();
-    let now = Utc::now().to_rfc3339();
+    let now = Utc::now();
     if let Err(_) = upsert_water_db(&app_state.pg_pool, &config, &now).await {
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error"}));
     }
@@ -416,7 +412,7 @@ pub async fn get_safety_config(
 ) -> impl Responder {
     let device_id = path.into_inner();
     let result =
-        sqlx::query_as::<_, SafetyConfig>("SELECT * FROM safety_config WHERE device_id = $1") // 🟢 $1
+        sqlx::query_as::<_, SafetyConfig>("SELECT * FROM safety_config WHERE device_id = $1")
             .bind(device_id)
             .fetch_optional(&app_state.pg_pool)
             .await;
@@ -436,9 +432,8 @@ pub async fn update_safety_config(
     let device_id = path.into_inner();
     let mut config = req.into_inner();
     config.device_id = device_id.clone();
-    config.last_updated = Utc::now().to_rfc3339();
+    config.last_updated = Utc::now();
     if let Err(_) = crate::db::postgres::upsert_safety_config(&app_state.pg_pool, &config).await {
-        // 🟢 postgres
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error"}));
     }
     let _ = sync_config_to_esp32(&app_state, &device_id).await;
@@ -453,7 +448,7 @@ pub async fn get_sensor_calibration(
     let device_id = path.into_inner();
     let result = sqlx::query_as::<_, SensorCalibration>(
         "SELECT * FROM sensor_calibration WHERE device_id = $1",
-    ) // 🟢 $1
+    )
     .bind(device_id)
     .fetch_optional(&app_state.pg_pool)
     .await;
@@ -472,7 +467,7 @@ pub async fn update_sensor_calibration(
 ) -> impl Responder {
     let device_id = path.into_inner();
     let config = req.into_inner();
-    let now = Utc::now().to_rfc3339();
+    let now = Utc::now();
     if let Err(_) = upsert_sensor_db(&app_state.pg_pool, &config, &now).await {
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error"}));
     }
@@ -488,7 +483,7 @@ pub async fn get_dosing_calibration(
     let device_id = path.into_inner();
     let result = sqlx::query_as::<_, DosingCalibration>(
         "SELECT * FROM dosing_calibration WHERE device_id = $1",
-    ) // 🟢 $1
+    )
     .bind(device_id)
     .fetch_optional(&app_state.pg_pool)
     .await;
@@ -507,7 +502,7 @@ pub async fn update_dosing_calibration(
 ) -> impl Responder {
     let device_id = path.into_inner();
     let config = req.into_inner();
-    let now = Utc::now().to_rfc3339();
+    let now = Utc::now();
     if let Err(_) = upsert_dosing_db(&app_state.pg_pool, &config, &now).await {
         return HttpResponse::InternalServerError().json(json!({"error": "DB Error"}));
     }
