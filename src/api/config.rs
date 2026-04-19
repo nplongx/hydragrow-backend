@@ -96,19 +96,69 @@ pub async fn sync_config_to_esp32(
     app_state: &web::Data<AppState>,
     device_id: &str,
 ) -> Result<(), String> {
+    // 1. GỬI CẤU HÌNH TỔNG HỢP CHO CONTROLLER NODE
     let payload = fetch_unified_mqtt_config(&app_state.pg_pool, device_id).await?;
-    let mqtt_topic = format!("AGITECH/{}/controller/config", device_id);
-    let mqtt_bytes =
+    let mqtt_topic_controller = format!("AGITECH/{}/controller/config", device_id);
+    let mqtt_bytes_controller =
         serde_json::to_vec(&payload).map_err(|e| format!("Lỗi serialize payload: {:?}", e))?;
 
     app_state
         .mqtt_client
-        .publish(&mqtt_topic, QoS::AtLeastOnce, true, mqtt_bytes)
+        .publish(
+            &mqtt_topic_controller,
+            QoS::AtLeastOnce,
+            true,
+            mqtt_bytes_controller,
+        )
         .await
-        .map_err(|e| format!("Lỗi gửi MQTT: {:?}", e))?;
+        .map_err(|e| format!("Lỗi gửi MQTT Controller: {:?}", e))?;
+
+    // 2. GỬI CẤU HÌNH CẢM BIẾN RIÊNG CHO SENSOR NODE
+    // Truy vấn lại riêng phần sensor để cấu trúc lại JSON map thẳng với C++ code
+    let sens = sqlx::query_as::<_, SensorCalibration>(
+        "SELECT * FROM sensor_calibration WHERE device_id = $1",
+    )
+    .bind(device_id)
+    .fetch_optional(&app_state.pg_pool)
+    .await
+    .ok()
+    .flatten();
+
+    if let Some(sensor_config) = sens {
+        let mqtt_topic_sensor = format!("AGITECH/{}/sensors/config", device_id);
+
+        // Tạo JSON Payload bám sát biến C++ của Sensor Node để tối ưu dung lượng và parse nhanh hơn
+        let sensor_payload = json!({
+            "ph_v7": sensor_config.ph_v7,
+            "ph_v4": sensor_config.ph_v4,
+            "ec_factor": sensor_config.ec_factor,
+            "ec_offset": sensor_config.ec_offset,
+            "temp_offset": sensor_config.temp_offset,
+            "temp_compensation_beta": sensor_config.temp_compensation_beta,
+            "moving_average_window": sensor_config.moving_average_window,
+            "publish_interval": sensor_config.publish_interval,
+            "en_ph": sensor_config.is_ph_enabled,
+            "en_ec": sensor_config.is_ec_enabled,
+            "en_temp": sensor_config.is_temp_enabled,
+            "en_water": sensor_config.is_water_level_enabled
+        });
+
+        if let Ok(mqtt_bytes_sensor) = serde_json::to_vec(&sensor_payload) {
+            app_state
+                .mqtt_client
+                .publish(
+                    &mqtt_topic_sensor,
+                    QoS::AtLeastOnce,
+                    true,
+                    mqtt_bytes_sensor,
+                )
+                .await
+                .map_err(|e| format!("Lỗi gửi MQTT Sensor: {:?}", e))?;
+        }
+    }
 
     info!(
-        "✅ Đã đồng bộ cấu hình FULL hợp nhất xuống ESP32 ({})",
+        "✅ Đã đồng bộ cấu hình FULL xuống Controller Node & Sensor Node ({})",
         device_id
     );
     Ok(())
@@ -530,4 +580,3 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(update_dosing_calibration),
         );
 }
-

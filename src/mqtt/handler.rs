@@ -197,6 +197,78 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
 
                 // 🟢 4. Phân tích chi tiết các trạng thái từ ESP32
                 match state {
+                    // --- CÁC TRẠNG THÁI MỚI BỔ SUNG ---
+                    "SystemBooting" => {
+                        alert = Some(AlertMessage {
+                            level: "success".to_string(),
+                            title: "Khởi Động Hệ Thống".to_string(),
+                            message: "Trạm điều khiển vừa được cấp nguồn và đang hoạt động."
+                                .to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "ManualMode" => {
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(),
+                            title: "Điều Khiển Thủ Công".to_string(),
+                            message: "Đang ở chế độ Manual (Thủ công). Hệ thống tắt tự động hóa."
+                                .to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "CleaningMode" => {
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(),
+                            title: "Chế Độ Súc Rửa".to_string(),
+                            message: "Đang chạy chu trình súc rửa bồn chứa.".to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "SensorCalibrating" => {
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(),
+                            title: "Hiệu Chuẩn Cảm Biến".to_string(),
+                            message: "Hệ thống đang ở chế độ hiệu chuẩn đầu dò cảm biến."
+                                .to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    "DosingCycleComplete" => {
+                        alert = Some(AlertMessage {
+                            level: "success".to_string(),
+                            title: "Hoàn Tất Chu Trình".to_string(),
+                            message: "Chu trình châm phân & điều chỉnh pH đã hoàn thành."
+                                .to_string(),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    s if s.starts_with("Warning:") => {
+                        let reason = s.replace("Warning:", "");
+                        alert = Some(AlertMessage {
+                            level: "warning".to_string(), // Frontend sẽ hiển thị vàng/cam
+                            title: "Cảnh Báo Hệ Thống".to_string(),
+                            message: format!("Phát hiện cảnh báo: {}", reason),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+                    s if s.starts_with("LogInfo:") => {
+                        let msg = s.replace("LogInfo:", "");
+                        alert = Some(AlertMessage {
+                            level: "info".to_string(), // Frontend hiển thị xanh dương
+                            title: "Nhật Ký (Log)".to_string(),
+                            message: msg,
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
+
+                    // --- CÁC TRẠNG THÁI CŨ GIỮ NGUYÊN ---
                     "EmergencyStop" => {
                         alert = Some(AlertMessage {
                             level: "critical".to_string(),
