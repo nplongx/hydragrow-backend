@@ -17,4 +17,5 @@ pub struct CropSeason {
 pub struct CreateCropSeasonRequest {
     pub name: String,
     pub plant_type: Option<String>,
+    pub description: Option<String>, // Bổ sung dòng này
 }
