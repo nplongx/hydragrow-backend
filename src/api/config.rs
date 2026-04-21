@@ -238,7 +238,7 @@ async fn upsert_sensor_db(
             device_id, ph_v7, ph_v4, ec_factor, ec_offset, temp_offset,
             temp_compensation_beta, publish_interval, moving_average_window,
             is_ph_enabled, is_ec_enabled, is_temp_enabled, is_water_level_enabled, last_calibrated
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         ON CONFLICT(device_id) DO UPDATE SET
             ph_v7 = EXCLUDED.ph_v7, ph_v4 = EXCLUDED.ph_v4, ec_factor = EXCLUDED.ec_factor,
             ec_offset = EXCLUDED.ec_offset, temp_offset = EXCLUDED.temp_offset,
