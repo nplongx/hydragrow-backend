@@ -165,6 +165,7 @@ impl Default for SafetyConfig {
 #[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct WaterConfig {
     pub device_id: String,
+    pub tank_height: i32,
     pub water_level_min: f32,
     pub water_level_target: f32,
     pub water_level_max: f32,
@@ -189,6 +190,7 @@ impl Default for WaterConfig {
     fn default() -> Self {
         Self {
             device_id: String::new(),
+            tank_height: 50,
             water_level_min: 10.0,
             water_level_target: 20.0,
             water_level_max: 30.0,
@@ -223,6 +225,7 @@ pub struct MqttConfigPayload {
     pub ec_tolerance: f32,
     pub ph_target: f32,
     pub ph_tolerance: f32,
+    pub tank_height: i32,
     pub water_level_min: f32,
     pub water_level_target: f32,
     pub water_level_max: f32,
@@ -299,6 +302,7 @@ impl MqttConfigPayload {
             ec_tolerance: dev.ec_tolerance,
             ph_target: dev.ph_target,
             ph_tolerance: dev.ph_tolerance,
+            tank_height: water.tank_height,
             water_level_min: water.water_level_min,
             water_level_target: water.water_level_target,
             water_level_max: water.water_level_max,

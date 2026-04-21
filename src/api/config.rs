@@ -172,14 +172,15 @@ async fn upsert_water_db(
     sqlx::query(
         r#"
         INSERT INTO water_config (
-            device_id, water_level_min, water_level_target, water_level_max,
+            device_id, tank_height, water_level_min, water_level_target, water_level_max,
             water_level_drain, circulation_mode, circulation_on_sec,
             circulation_off_sec, water_level_tolerance, auto_refill_enabled,
             auto_drain_overflow, auto_dilute_enabled, dilute_drain_amount_cm,
             scheduled_water_change_enabled, water_change_interval_sec, scheduled_drain_amount_cm,
             misting_on_duration_ms, misting_off_duration_ms, last_updated
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         ON CONFLICT(device_id) DO UPDATE SET
+            tank_height = EXCLUDED.tank_height,
             water_level_min = EXCLUDED.water_level_min, 
             water_level_target = EXCLUDED.water_level_target,
             water_level_max = EXCLUDED.water_level_max, 
