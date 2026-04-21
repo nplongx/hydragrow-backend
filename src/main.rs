@@ -20,7 +20,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use crate::{
     models::{alert::AlertMessage, sensor::SensorData},
-    services::{scheduler::start_tuya_scheduler, solana::SolanaTraceability},
+    services::solana::SolanaTraceability,
 };
 
 pub mod api;
@@ -200,4 +200,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-
