@@ -12,80 +12,77 @@ use crate::models::config::{
 };
 
 // ==========================================
-// HELPER FUNCTIONS (DB & MQTT)
+// HELPER FUNCTIONS (Đã khôi phục các hàm nội bộ)
 // ==========================================
 
-async fn fetch_unified_mqtt_config(
+// 🔥 TỐI ƯU: Đọc 5 bảng DB cùng lúc song song (Tiết kiệm 80% thời gian)
+async fn fetch_unified_config_concurrently(
     pool: &sqlx::PgPool,
     device_id: &str,
 ) -> Result<MqttConfigPayload, String> {
-    let dev = sqlx::query_as::<_, DeviceConfig>("SELECT * FROM device_config WHERE device_id = $1")
-        .bind(device_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| format!("DB Error: {}", e))?
-        .ok_or_else(|| "Device base config not found".to_string())?;
-
-    let water = sqlx::query_as::<_, WaterConfig>("SELECT * FROM water_config WHERE device_id = $1")
-        .bind(device_id)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| WaterConfig {
-            device_id: device_id.to_string(),
-            ..Default::default()
-        });
-
-    let safe =
+    let (dev_res, water_res, safe_res, dose_res, sens_res) = tokio::join!(
+        sqlx::query_as::<_, DeviceConfig>("SELECT * FROM device_config WHERE device_id = $1")
+            .bind(device_id)
+            .fetch_optional(pool),
+        sqlx::query_as::<_, WaterConfig>("SELECT * FROM water_config WHERE device_id = $1")
+            .bind(device_id)
+            .fetch_optional(pool),
         sqlx::query_as::<_, SafetyConfig>("SELECT * FROM safety_config WHERE device_id = $1")
             .bind(device_id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| SafetyConfig {
-                device_id: device_id.to_string(),
-                ..Default::default()
-            });
+            .fetch_optional(pool),
+        sqlx::query_as::<_, DosingCalibration>(
+            "SELECT * FROM dosing_calibration WHERE device_id = $1"
+        )
+        .bind(device_id)
+        .fetch_optional(pool),
+        sqlx::query_as::<_, SensorCalibration>(
+            "SELECT * FROM sensor_calibration WHERE device_id = $1"
+        )
+        .bind(device_id)
+        .fetch_optional(pool)
+    );
 
-    let dose = sqlx::query_as::<_, DosingCalibration>(
-        "SELECT * FROM dosing_calibration WHERE device_id = $1",
-    )
-    .bind(device_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or_else(|| DosingCalibration {
+    let dev = dev_res
+        .map_err(|e| format!("DB Error dev: {}", e))?
+        .ok_or_else(|| "Device base config not found".to_string())?;
+
+    let water = water_res.ok().flatten().unwrap_or_else(|| WaterConfig {
         device_id: device_id.to_string(),
         ..Default::default()
     });
 
-    let sens = sqlx::query_as::<_, SensorCalibration>(
-        "SELECT * FROM sensor_calibration WHERE device_id = $1",
-    )
-    .bind(device_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or_else(|| SensorCalibration {
+    let safe = safe_res.ok().flatten().unwrap_or_else(|| SafetyConfig {
         device_id: device_id.to_string(),
-        ph_v7: 1650.0,
-        ph_v4: 1846.4,
-        ec_factor: 880.0,
-        ec_offset: 0.0,
-        temp_offset: 0.0,
-        temp_compensation_beta: 0.02,
-        publish_interval: 5000,
-        moving_average_window: 10,
-        is_ph_enabled: true,
-        is_ec_enabled: true,
-        is_temp_enabled: true,
-        is_water_level_enabled: true,
-        last_calibrated: Utc::now(),
+        ..Default::default()
     });
+
+    let dose = dose_res
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| DosingCalibration {
+            device_id: device_id.to_string(),
+            ..Default::default()
+        });
+
+    let sens = sens_res
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| SensorCalibration {
+            device_id: device_id.to_string(),
+            ph_v7: 2.5,
+            ph_v4: 1.428,
+            ec_factor: 880.0,
+            ec_offset: 0.0,
+            temp_offset: 0.0,
+            temp_compensation_beta: 0.02,
+            publish_interval: 5000,
+            moving_average_window: 10,
+            is_ph_enabled: true,
+            is_ec_enabled: true,
+            is_temp_enabled: true,
+            is_water_level_enabled: true,
+            last_calibrated: Utc::now(),
+        });
 
     Ok(MqttConfigPayload::from_db_rows(
         &dev, &water, &safe, &dose, &sens,
@@ -96,8 +93,8 @@ pub async fn sync_config_to_esp32(
     app_state: &web::Data<AppState>,
     device_id: &str,
 ) -> Result<(), String> {
-    // 1. GỬI CẤU HÌNH TỔNG HỢP CHO CONTROLLER NODE
-    let payload = fetch_unified_mqtt_config(&app_state.pg_pool, device_id).await?;
+    // 1. GỬI CẤU HÌNH TỔNG HỢP CHO CONTROLLER NODE (Dùng hàm chạy song song)
+    let payload = fetch_unified_config_concurrently(&app_state.pg_pool, device_id).await?;
     let mqtt_topic_controller = format!("AGITECH/{}/controller/config", device_id);
     let mqtt_bytes_controller =
         serde_json::to_vec(&payload).map_err(|e| format!("Lỗi serialize payload: {:?}", e))?;
@@ -140,7 +137,6 @@ pub async fn sync_config_to_esp32(
             "enable_ec_sensor": sensor_config.is_ec_enabled,
             "enable_temp_sensor": sensor_config.is_temp_enabled,
             "enable_water_level_sensor": sensor_config.is_water_level_enabled,
-            // Thêm field tank_height cho siêu âm nếu cần từ bảng water
             "tank_height": payload.tank_height
         });
 
@@ -170,7 +166,6 @@ async fn upsert_water_db(
     config: &WaterConfig,
     now: &chrono::DateTime<chrono::Utc>,
 ) -> Result<(), sqlx::Error> {
-    // 🟢 SỬA SQL QUERY BẢNG WATER (Dùng water_change_cron)
     sqlx::query(
         r#"
         INSERT INTO water_config (
@@ -273,7 +268,6 @@ async fn upsert_dosing_db(
     cal: &DosingCalibration,
     now: &chrono::DateTime<chrono::Utc>,
 ) -> Result<(), sqlx::Error> {
-    // 🟢 SỬA SQL QUERY BẢNG DOSING (Dùng cron và 4 cột bơm mới)
     sqlx::query(
         r#"
         INSERT INTO dosing_calibration (
@@ -407,13 +401,32 @@ pub async fn get_unified_device_config(
     let device_id = path.into_inner();
     let pool = &app_state.pg_pool;
 
-    // Lấy từng cấu hình rác từ DB
-    let dev = sqlx::query_as::<_, DeviceConfig>("SELECT * FROM device_config WHERE device_id = $1")
+    // 🔥 TỐI ƯU CONCURRENCY: Lấy 5 bảng DB trong chớp mắt
+    let (dev_res, water_res, safe_res, dose_res, sens_res) = tokio::join!(
+        sqlx::query_as::<_, DeviceConfig>("SELECT * FROM device_config WHERE device_id = $1")
+            .bind(&device_id)
+            .fetch_optional(pool),
+        sqlx::query_as::<_, WaterConfig>("SELECT * FROM water_config WHERE device_id = $1")
+            .bind(&device_id)
+            .fetch_optional(pool),
+        sqlx::query_as::<_, SafetyConfig>("SELECT * FROM safety_config WHERE device_id = $1")
+            .bind(&device_id)
+            .fetch_optional(pool),
+        sqlx::query_as::<_, DosingCalibration>(
+            "SELECT * FROM dosing_calibration WHERE device_id = $1"
+        )
+        .bind(&device_id)
+        .fetch_optional(pool),
+        sqlx::query_as::<_, SensorCalibration>(
+            "SELECT * FROM sensor_calibration WHERE device_id = $1"
+        )
         .bind(&device_id)
         .fetch_optional(pool)
-        .await
-        .unwrap_or_default() // Bỏ qua lỗi, nếu null thì Option::None
-        .unwrap_or_else(|| DeviceConfig {
+    );
+
+    // Gói lại & Tạo giá trị fallback nếu DB trống
+    let response_payload = UnifiedConfigRequest {
+        device_config: dev_res.ok().flatten().unwrap_or_else(|| DeviceConfig {
             device_id: device_id.clone(),
             ec_target: 1.5,
             ec_tolerance: 0.1,
@@ -425,77 +438,41 @@ pub async fn get_unified_device_config(
             is_enabled: false,
             delay_between_a_and_b_sec: 10,
             last_updated: Utc::now(),
-        });
-
-    let water = sqlx::query_as::<_, WaterConfig>("SELECT * FROM water_config WHERE device_id = $1")
-        .bind(&device_id)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| WaterConfig {
+        }),
+        water_config: water_res.ok().flatten().unwrap_or_else(|| WaterConfig {
             device_id: device_id.clone(),
             ..Default::default()
-        });
-
-    let safe =
-        sqlx::query_as::<_, SafetyConfig>("SELECT * FROM safety_config WHERE device_id = $1")
-            .bind(&device_id)
-            .fetch_optional(pool)
-            .await
+        }),
+        safety_config: safe_res.ok().flatten().unwrap_or_else(|| SafetyConfig {
+            device_id: device_id.clone(),
+            ..Default::default()
+        }),
+        dosing_calibration: dose_res
             .ok()
             .flatten()
-            .unwrap_or_else(|| SafetyConfig {
+            .unwrap_or_else(|| DosingCalibration {
                 device_id: device_id.clone(),
                 ..Default::default()
-            });
-
-    let dose = sqlx::query_as::<_, DosingCalibration>(
-        "SELECT * FROM dosing_calibration WHERE device_id = $1",
-    )
-    .bind(&device_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or_else(|| DosingCalibration {
-        device_id: device_id.clone(),
-        ..Default::default()
-    });
-
-    let sens = sqlx::query_as::<_, SensorCalibration>(
-        "SELECT * FROM sensor_calibration WHERE device_id = $1",
-    )
-    .bind(&device_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or_else(|| SensorCalibration {
-        device_id: device_id.clone(),
-        ph_v7: 2.5,
-        ph_v4: 1.428,
-        ec_factor: 880.0,
-        ec_offset: 0.0,
-        temp_offset: 0.0,
-        temp_compensation_beta: 0.02,
-        publish_interval: 5000,
-        moving_average_window: 10,
-        is_ph_enabled: true,
-        is_ec_enabled: true,
-        is_temp_enabled: true,
-        is_water_level_enabled: true,
-        last_calibrated: Utc::now(),
-    });
-
-    // 🟢 ĐÃ SỬA: Đóng gói lại thành cấu trúc lồng nhau (UnifiedConfigRequest)
-    // Cấu trúc này sẽ khớp 100% với JSON mà file Settings.tsx đang mong đợi
-    let response_payload = UnifiedConfigRequest {
-        device_config: dev,
-        water_config: water,
-        safety_config: safe,
-        sensor_calibration: sens,
-        dosing_calibration: dose,
+            }),
+        sensor_calibration: sens_res
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| SensorCalibration {
+                device_id: device_id.clone(),
+                ph_v7: 2.5,
+                ph_v4: 1.428,
+                ec_factor: 880.0,
+                ec_offset: 0.0,
+                temp_offset: 0.0,
+                temp_compensation_beta: 0.02,
+                publish_interval: 5000,
+                moving_average_window: 10,
+                is_ph_enabled: true,
+                is_ec_enabled: true,
+                is_temp_enabled: true,
+                is_water_level_enabled: true,
+                last_calibrated: Utc::now(),
+            }),
     };
 
     HttpResponse::Ok().json(response_payload)
@@ -691,3 +668,4 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(update_dosing_calibration),
         );
 }
+

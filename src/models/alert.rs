@@ -7,4 +7,7 @@ pub struct AlertMessage {
     pub message: String,
     pub device_id: String,
     pub timestamp: u64,
+
+    pub reason: Option<String>,
+    pub metadata: Option<serde_json::Value>,
 }

@@ -12,6 +12,7 @@ use crate::AppState;
 use crate::db::influx::write_sensor_data;
 use crate::models::alert::AlertMessage;
 use crate::models::sensor::{PumpStatus, SensorData};
+use crate::services::solana::SolanaTraceability;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DosingReportPayload {
@@ -35,21 +36,14 @@ struct FsmPayload {
     pub current_state: String,
 }
 
-// Trong src/mqtt/handler.rs (Backend)
 #[derive(Debug, Deserialize)]
 pub struct IncomingSensorPayload {
     pub temp: Option<f64>,
-
     pub ec: Option<f64>,
-
     pub ph: Option<f64>,
-
     pub water_level: Option<f64>,
-
-    // SỬA Ở ĐÂY: map JSON key "last_update_ms" của ESP32 vào biến này
     #[serde(rename = "last_update_ms")]
     pub timestamp_ms: Option<u64>,
-
     pub pump_status: Option<PumpStatus>,
 }
 
@@ -119,6 +113,12 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         device_id, sensor_data.ph_value, sensor_data.ec_value
     );
 
+    // 🟢 Lưu dữ liệu cảm biến vào RAM để FSM có thể trích xuất làm Metadata khi có lỗi
+    if let Ok(json_str) = serde_json::to_string(&sensor_data) {
+        let mut states = app_state.device_states.write().await;
+        states.insert(device_id.clone(), json_str);
+    }
+
     if let Err(e) = write_sensor_data(
         &app_state.influx_client,
         &app_state.influx_bucket,
@@ -129,7 +129,6 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         error!("Lỗi lưu SensorData vào InfluxDB ({}): {:?}", device_id, e);
     }
 
-    // Gửi sang luồng WebSocket (ws.rs sẽ tự động bọc {"type": "sensor_update"} cho Frontend)
     let _ = app_state.sensor_sender.send(sensor_data);
 }
 
@@ -147,7 +146,6 @@ async fn handle_device_status(device_id: String, payload: &[u8], app_state: web:
         device_id, status.online
     );
 
-    // 🟢 SỬA THÀNH ALERT MESSAGE CHUẨN ĐỂ WS.RS XỬ LÝ KHÔNG BỊ LỖI TYPE
     let alert = AlertMessage {
         level: if status.online {
             "success".to_string()
@@ -166,35 +164,42 @@ async fn handle_device_status(device_id: String, payload: &[u8], app_state: web:
         ),
         device_id: device_id.clone(),
         timestamp: chrono::Utc::now().timestamp_millis() as u64,
+        reason: None,
+        metadata: None,
     };
 
     let _ = app_state.alert_sender.send(alert);
 }
 
 async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
-    // 🟢 1. In ra RAW DATA ngay lập tức để chắc chắn Backend đã nhận được tin nhắn
     let raw_payload = std::str::from_utf8(payload).unwrap_or("Lỗi UTF-8");
     info!("📥 [MQTT-FSM] {} gửi gói tin: {}", device_id, raw_payload);
 
-    // 🟢 2. Bắt lỗi Parse JSON rõ ràng
     match serde_json::from_slice::<serde_json::Value>(payload) {
         Ok(json) => {
-            // 🟢 3. Kiểm tra xem có trường "current_state" không
             if let Some(state) = json["current_state"].as_str() {
                 let fsm_sync_msg = AlertMessage {
                     level: "FSM_UPDATE".to_string(),
                     title: "FSM_SYNC".to_string(),
-                    message: state.to_string(), // Ví dụ: "SystemFault:SENSOR_DISCONNECTED"
+                    message: state.to_string(),
                     device_id: device_id.clone(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    reason: None,
+                    metadata: None,
                 };
                 let _ = app_state.alert_sender.send(fsm_sync_msg);
 
                 let mut alert = None;
 
-                // 🟢 4. Phân tích chi tiết các trạng thái từ ESP32
+                // 🟢 Trích xuất thông số cảm biến mới nhất từ RAM để làm Metadata
+                let current_sensors = app_state.device_states.read().await;
+                let metadata_json = if let Some(sensor_str) = current_sensors.get(&device_id) {
+                    serde_json::from_str::<serde_json::Value>(sensor_str).ok()
+                } else {
+                    None
+                };
+
                 match state {
-                    // --- CÁC TRẠNG THÁI MỚI BỔ SUNG ---
                     "SystemBooting" => {
                         alert = Some(AlertMessage {
                             level: "success".to_string(),
@@ -203,6 +208,8 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                                 .to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     "ManualMode" => {
@@ -213,6 +220,8 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                                 .to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     "CleaningMode" => {
@@ -222,6 +231,8 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             message: "Đang chạy chu trình súc rửa bồn chứa.".to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     "SensorCalibrating" => {
@@ -232,6 +243,8 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                                 .to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     "DosingCycleComplete" => {
@@ -242,40 +255,46 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                                 .to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     s if s.starts_with("Warning:") => {
-                        let reason = s.replace("Warning:", "");
+                        let reason_str = s.replace("Warning:", "");
                         alert = Some(AlertMessage {
-                            level: "warning".to_string(), // Frontend sẽ hiển thị vàng/cam
+                            level: "warning".to_string(),
                             title: "Cảnh Báo Hệ Thống".to_string(),
-                            message: format!("Phát hiện cảnh báo: {}", reason),
+                            message: format!("Phát hiện cảnh báo: {}", reason_str),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: Some(reason_str),
+                            metadata: metadata_json.clone(),
                         });
                     }
                     s if s.starts_with("LogInfo:") => {
                         let msg = s.replace("LogInfo:", "");
                         alert = Some(AlertMessage {
-                            level: "info".to_string(), // Frontend hiển thị xanh dương
+                            level: "info".to_string(),
                             title: "Nhật Ký (Log)".to_string(),
                             message: msg,
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     s if s.starts_with("EmergencyStop:") => {
-                        let reason = s.replace("EmergencyStop:", "");
+                        let reason_str = s.replace("EmergencyStop:", "");
                         alert = Some(AlertMessage {
                             level: "critical".to_string(),
                             title: "Dừng Khẩn Cấp!".to_string(),
-                            message: format!("Hệ thống bị ngắt khẩn cấp. Lý do: {}", reason),
+                            message: format!("Hệ thống bị ngắt khẩn cấp. Lý do: {}", reason_str),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: Some(reason_str),
+                            metadata: metadata_json.clone(), // 🟢 Nhét Metadata vào đây!
                         });
                     }
-
-                    // --- CÁC TRẠNG THÁI CŨ GIỮ NGUYÊN ---
                     "EmergencyStop" => {
                         alert = Some(AlertMessage {
                             level: "critical".to_string(),
@@ -284,19 +303,23 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                                 .to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: metadata_json.clone(),
                         });
                     }
                     s if s.starts_with("SystemFault:") => {
-                        let reason = s.replace("SystemFault:", "");
+                        let reason_str = s.replace("SystemFault:", "");
                         alert = Some(AlertMessage {
                             level: "critical".to_string(),
                             title: "Lỗi Hệ Thống!".to_string(),
                             message: format!(
                                 "Phát hiện lỗi phần cứng: {}. Vui lòng kiểm tra!",
-                                reason
+                                reason_str
                             ),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: Some(reason_str),
+                            metadata: metadata_json.clone(), // 🟢 Cả SystemFault cũng có Metadata!
                         });
                     }
                     "WaterRefilling" => {
@@ -306,6 +329,8 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             message: "Hệ thống đang tiến hành bơm cấp nước vào bồn.".to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     "WaterDraining" => {
@@ -315,6 +340,8 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             message: "Hệ thống đang xả bớt nước trong bồn.".to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     "DosingPumpA" => {
@@ -324,6 +351,8 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             message: "Đang tiến hành châm phân bón Dinh Dưỡng A.".to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     "DosingPumpB" => {
@@ -333,6 +362,8 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             message: "Đang tiến hành châm phân bón Dinh Dưỡng B.".to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     "DosingPH" => {
@@ -342,6 +373,8 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             message: "Đang tiến hành bơm dung dịch điều chỉnh pH.".to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
                     "ActiveMixing" => {
@@ -351,9 +384,10 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             message: "Đang trộn đều dung dịch trong bồn (Jet Mixing).".to_string(),
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            reason: None,
+                            metadata: None,
                         });
                     }
-                    // Các trạng thái quá độ/chuyển tiếp ngắn, chỉ in log Backend để tránh spam UI Frontend
                     "StartingOsakaPump" => {
                         debug!("Bắt đầu khởi động bơm trung tâm (Osaka).");
                     }
@@ -371,7 +405,6 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                     }
                 }
 
-                // 🟢 5. Xử lý phân luồng thông báo (UI vs Mobile Push)
                 if let Some(alert_msg) = alert {
                     if alert_msg.level == "critical" || alert_msg.level == "warning" {
                         info!("🚨 KÍCH HOẠT BÁO ĐỘNG: {}", alert_msg.title);
@@ -379,15 +412,13 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                         info!("ℹ️ THAY ĐỔI TRẠNG THÁI: {}", alert_msg.title);
                     }
 
-                    // Luôn gửi lên WebSocket (Cho React Web hiển thị Toast/Timeline)
                     let _ = app_state.alert_sender.send(alert_msg.clone());
 
-                    // CHỈ gửi Push Notification tới Mobile nếu là lỗi (Tránh spam thông báo điện thoại)
                     if alert_msg.level == "critical" || alert_msg.level == "warning" {
                         let tokens = app_state.fcm_tokens.lock().unwrap().clone();
                         if tokens.is_empty() {
                             warn!(
-                                "⚠️ Không có FCM Token nào trong RAM! Không thể gửi Push Notification tới điện thoại."
+                                "⚠️ Không có FCM Token nào trong RAM! Không thể gửi Push Notification."
                             );
                         } else {
                             tokio::spawn(async move {
@@ -428,7 +459,7 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
     let season_id_str =
         match crate::db::postgres::get_active_crop_season(&app_state.pg_pool, &device_id).await {
             Ok(season) => season.unwrap().id.to_string(),
-            Err(_) => "".to_string(), // Nếu không có mùa vụ nào đang chạy, để trống
+            Err(_) => "".to_string(),
         };
 
     let blockchain_payload = json!({
@@ -448,7 +479,6 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
         Ok(tx_id) => {
             info!("✅ Đã ghi lên Solana thành công! TxID: {}", tx_id);
 
-            // 🟢 BƯỚC 3: LƯU VÀO DATABASE ĐỂ TRANG "NIÊM PHONG" CÓ THỂ ĐỌC ĐƯỢC
             let action_str = format!(
                 "Châm phân tự động: A({:.1}ml), B({:.1}ml)",
                 report.pump_a_ml, report.pump_b_ml
@@ -463,10 +493,9 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
             )
             .await
             {
-                error!("❌ Lỗi lưu TxID vào SQLite: {:?}", db_err);
+                error!("❌ Lỗi lưu TxID vào Database: {:?}", db_err);
             }
 
-            // Gửi Alert lên Frontend (Đã có sẵn)
             let alert = AlertMessage {
                 level: "success".to_string(),
                 title: "Ghi Blockchain Thành Công".to_string(),
@@ -476,6 +505,8 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
                 ),
                 device_id: device_id.clone(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                reason: None, // 🟢 Đã fix E0425
+                metadata: None,
             };
             let _ = app_state.alert_sender.send(alert);
         }
@@ -491,8 +522,11 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
                 ),
                 device_id: device_id.clone(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                reason: Some(e.to_string()), // Ghi nhận lỗi mạng/Solana làm reason
+                metadata: None,
             };
             let _ = app_state.alert_sender.send(alert);
         }
     }
 }
+

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{Error, FromRow, PgPool, Row};
+use sqlx::{Error, Executor, FromRow, PgPool, Row}; // 🟢 Thêm Executor
 use tracing::instrument;
 
 use crate::models::alert::AlertMessage;
@@ -11,19 +11,32 @@ use crate::models::crop_season::{CreateCropSeasonRequest, CropSeason};
 // 🟢 1. Cấu trúc Blockchain Record
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct BlockchainRecord {
-    pub id: i32, // Postgres SERIAL map với i32
+    pub id: i32,
     pub device_id: String,
     pub season_id: Option<String>,
     pub action: String,
     pub tx_id: String,
-    pub created_at: DateTime<Utc>, // Postgres TIMESTAMPTZ map với DateTime<Utc>
+    pub created_at: DateTime<Utc>,
+}
+
+// 🟢 MỚI: Cấu trúc System Event Log (Đồng bộ với Frontend)
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct SystemEventRecord {
+    pub id: String,
+    pub device_id: String,
+    pub level: String,
+    pub category: String, // 'system', 'dosing', 'fsm', 'alert'
+    pub title: String,
+    pub message: String,
+    pub reason: Option<String>,
+    pub metadata: Option<serde_json::Value>, // 🟢 Lưu JSONB để Frontend render chi tiết
+    pub timestamp: i64,
 }
 
 /// --- DEVICE CONFIG ---
 
 #[instrument(skip(pool))]
 pub async fn get_device_config(pool: &PgPool, device_id: &str) -> Result<DeviceConfig> {
-    // 🟢 ĐÃ SỬA: Bỏ pump_a_capacity_ml_per_sec và pump_b_capacity_ml_per_sec (Đã chuyển sang bảng dosing)
     let config = sqlx::query_as::<_, DeviceConfig>(
         r#"SELECT
             device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
@@ -39,9 +52,12 @@ pub async fn get_device_config(pool: &PgPool, device_id: &str) -> Result<DeviceC
     Ok(config)
 }
 
-#[instrument(skip(pool, config))]
-pub async fn upsert_device_config(pool: &PgPool, config: &DeviceConfig) -> Result<()> {
-    // 🟢 ĐÃ SỬA: Bỏ các tham số liên quan đến pump_capacity
+// 🟢 SỬA: Đổi pool: &PgPool thành executor: impl Executor để hỗ trợ Transaction
+#[instrument(skip(executor, config))]
+pub async fn upsert_device_config(
+    executor: impl Executor<'_, Database = sqlx::Postgres>,
+    config: &DeviceConfig,
+) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO device_config (
@@ -73,7 +89,7 @@ pub async fn upsert_device_config(pool: &PgPool, config: &DeviceConfig) -> Resul
     .bind(config.is_enabled)
     .bind(config.delay_between_a_and_b_sec)
     .bind(&config.last_updated)
-    .execute(pool)
+    .execute(executor) // Chạy trên Executor (có thể là Pool hoặc Transaction)
     .await
     .context("Failed to upsert device_config")?;
 
@@ -104,8 +120,12 @@ pub async fn get_safety_config(pool: &PgPool, device_id: &str) -> Result<SafetyC
     Ok(config)
 }
 
-#[instrument(skip(pool, config))]
-pub async fn upsert_safety_config(pool: &PgPool, config: &SafetyConfig) -> Result<()> {
+// 🟢 SỬA: Hỗ trợ Transaction
+#[instrument(skip(executor, config))]
+pub async fn upsert_safety_config(
+    executor: impl Executor<'_, Database = sqlx::Postgres>,
+    config: &SafetyConfig,
+) -> Result<()> {
     sqlx::query(
         r#"
     INSERT INTO safety_config (
@@ -162,7 +182,7 @@ pub async fn upsert_safety_config(pool: &PgPool, config: &SafetyConfig) -> Resul
     .bind(config.ph_ack_threshold)
     .bind(config.water_ack_threshold)
     .bind(&config.last_updated)
-    .execute(pool)
+    .execute(executor) // Chạy trên Executor
     .await?;
 
     Ok(())
@@ -284,7 +304,6 @@ pub async fn update_active_crop_season(
     plant_type: Option<&str>,
     description: Option<&str>,
 ) -> Result<CropSeason, sqlx::Error> {
-    // 1. Kiểm tra xem có mùa vụ nào đang active không
     let active_season_id: Option<String> =
         sqlx::query("SELECT id FROM crop_seasons WHERE device_id = $1 AND status = 'active'")
             .bind(device_id)
@@ -294,7 +313,6 @@ pub async fn update_active_crop_season(
 
     match active_season_id {
         Some(id) => {
-            // 2. Cập nhật record đó
             let updated = sqlx::query(
                 r#"
                 UPDATE crop_seasons 
@@ -327,33 +345,41 @@ pub async fn update_active_crop_season(
 
 /// --- SYSTEM EVENTS ---
 
-pub async fn insert_system_event(pool: &PgPool, alert: &AlertMessage) -> Result<(), sqlx::Error> {
-    let ts = alert.timestamp as i64;
+// 🟢 NÂNG CẤP MẠNH: Cho phép ghi Log chi tiết thay vì chỉ Alert đơn thuần
+pub async fn insert_system_event(
+    executor: impl Executor<'_, Database = sqlx::Postgres>,
+    log: &SystemEventRecord,
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
-        INSERT INTO system_events (device_id, level, title, message, timestamp)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO system_events (device_id, level, category, title, message, reason, metadata, timestamp)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
-    .bind(&alert.device_id)
-    .bind(&alert.level)
-    .bind(&alert.title)
-    .bind(&alert.message)
-    .bind(ts)
-    .execute(pool)
+    .bind(&log.device_id)
+    .bind(&log.level)
+    .bind(&log.category)
+    .bind(&log.title)
+    .bind(&log.message)
+    .bind(&log.reason)
+    .bind(&log.metadata) // SQLx sẽ tự động map serde_json::Value sang JSONB
+    .bind(log.timestamp)
+    .execute(executor)
     .await?;
 
     Ok(())
 }
 
+// 🟢 NÂNG CẤP: Lấy Full dữ liệu bao gồm cả Metadata và Reason trả về cho Frontend
 pub async fn get_system_events(
     pool: &PgPool,
     device_id: &str,
     limit: i64,
-) -> Result<Vec<AlertMessage>, sqlx::Error> {
-    let rows = sqlx::query(
+) -> Result<Vec<SystemEventRecord>, sqlx::Error> {
+    // Tự động map vào Struct bằng FromRow
+    let events = sqlx::query_as::<_, SystemEventRecord>(
         r#"
-        SELECT level, title, message, device_id, timestamp
+        SELECT id, device_id, level, category, title, message, reason, metadata, timestamp
         FROM system_events
         WHERE device_id = $1
         ORDER BY timestamp DESC
@@ -365,17 +391,5 @@ pub async fn get_system_events(
     .fetch_all(pool)
     .await?;
 
-    let events = rows
-        .into_iter()
-        .map(|r| AlertMessage {
-            level: r.get("level"),
-            title: r.get("title"),
-            message: r.get("message"),
-            device_id: r.get("device_id"),
-            timestamp: r.get::<i64, _>("timestamp") as u64,
-        })
-        .collect();
-
     Ok(events)
 }
-

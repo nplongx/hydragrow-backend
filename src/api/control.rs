@@ -126,6 +126,8 @@ pub async fn control_pump(
             action_vn, req_data.pump
         ),
         device_id: device_id.clone(),
+        reason: Some(format!("Người dùng bấm nút điều khiển qua Web/App")), // 🟢 Bổ sung reason
+        metadata: None, // 🟢 Bổ sung metadata (để None vì không cần lưu chi tiết sensor lúc người dùng bấm)
         timestamp: chrono::Utc::now().timestamp_millis() as u64,
     };
 

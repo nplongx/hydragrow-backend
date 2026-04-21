@@ -97,12 +97,35 @@ async fn main() -> anyhow::Result<()> {
 
     let db_pool_clone = pg_pool.clone(); // 🟢 SỬ DỤNG pg_pool
 
+    // 🟢 ĐÃ SỬA: Map AlertMessage sang SystemEventRecord trước khi lưu
     tokio::spawn(async move {
         while let Ok(alert) = alert_rx_for_db.recv().await {
             if alert.level != "FSM_UPDATE" {
-                // 🟢 GỌI VÀO postgres THAY VÌ sqlite
+                // 🟢 Tự động phân loại category dựa vào level của cảnh báo
+                let category = if alert.level == "critical" || alert.level == "warning" {
+                    "alert".to_string()
+                } else if alert.title.contains("Châm Phân") || alert.title.contains("pH") {
+                    "dosing".to_string()
+                } else {
+                    "system".to_string()
+                };
+
+                // Khởi tạo struct tương thích với Database
+                let record = crate::db::postgres::SystemEventRecord {
+                    id: uuid::Uuid::new_v4().to_string(), // 🟢 Sinh ID ngẫu nhiên làm Primary Key
+                    category,                             // 🟢 Thêm phân loại
+                    device_id: alert.device_id.clone(),
+                    level: alert.level.clone(),
+                    title: alert.title.clone(),
+                    message: alert.message.clone(),
+                    timestamp: alert.timestamp as i64,
+                    reason: alert.reason.clone(),
+                    metadata: alert.metadata.clone(),
+                };
+
+                // Đẩy record đã chuyển đổi vào Database
                 if let Err(e) =
-                    crate::db::postgres::insert_system_event(&db_pool_clone, &alert).await
+                    crate::db::postgres::insert_system_event(&db_pool_clone, &record).await
                 {
                     tracing::error!("Lỗi ghi System Event vào DB: {:?}", e);
                 }
