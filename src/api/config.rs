@@ -1,6 +1,7 @@
 use actix_web::{HttpResponse, Responder, web};
 use chrono::Utc;
 use rumqttc::QoS;
+use serde::Serialize;
 use serde_json::json;
 use tracing::{error, info, instrument};
 
@@ -333,7 +334,7 @@ async fn upsert_dosing_db(
     Ok(())
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Serialize)]
 pub struct UnifiedConfigRequest {
     pub device_config: DeviceConfig,
     pub water_config: WaterConfig,
@@ -405,10 +406,101 @@ pub async fn get_unified_device_config(
     app_state: web::Data<AppState>,
 ) -> impl Responder {
     let device_id = path.into_inner();
-    match fetch_unified_mqtt_config(&app_state.pg_pool, &device_id).await {
-        Ok(aggregated) => HttpResponse::Ok().json(aggregated),
-        Err(e) => HttpResponse::NotFound().json(json!({"error": e})),
-    }
+    let pool = &app_state.pg_pool;
+
+    // Lấy từng cấu hình rác từ DB
+    let dev = sqlx::query_as::<_, DeviceConfig>("SELECT * FROM device_config WHERE device_id = $1")
+        .bind(&device_id)
+        .fetch_optional(pool)
+        .await
+        .unwrap_or_default() // Bỏ qua lỗi, nếu null thì Option::None
+        .unwrap_or_else(|| DeviceConfig {
+            device_id: device_id.clone(),
+            ec_target: 1.5,
+            ec_tolerance: 0.1,
+            ph_target: 6.0,
+            ph_tolerance: 0.5,
+            temp_target: 25.0,
+            temp_tolerance: 2.0,
+            control_mode: "auto".to_string(),
+            is_enabled: false,
+            delay_between_a_and_b_sec: 10,
+            last_updated: Utc::now(),
+        });
+
+    let water = sqlx::query_as::<_, WaterConfig>("SELECT * FROM water_config WHERE device_id = $1")
+        .bind(&device_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| WaterConfig {
+            device_id: device_id.clone(),
+            ..Default::default()
+        });
+
+    let safe =
+        sqlx::query_as::<_, SafetyConfig>("SELECT * FROM safety_config WHERE device_id = $1")
+            .bind(&device_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| SafetyConfig {
+                device_id: device_id.clone(),
+                ..Default::default()
+            });
+
+    let dose = sqlx::query_as::<_, DosingCalibration>(
+        "SELECT * FROM dosing_calibration WHERE device_id = $1",
+    )
+    .bind(&device_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| DosingCalibration {
+        device_id: device_id.clone(),
+        ..Default::default()
+    });
+
+    let sens = sqlx::query_as::<_, SensorCalibration>(
+        "SELECT * FROM sensor_calibration WHERE device_id = $1",
+    )
+    .bind(&device_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| SensorCalibration {
+        device_id: device_id.clone(),
+        ph_v7: 2.5,
+        ph_v4: 1.428,
+        ec_factor: 880.0,
+        ec_offset: 0.0,
+        temp_offset: 0.0,
+        temp_compensation_beta: 0.02,
+        sampling_interval: 1000,
+        publish_interval: 5000,
+        moving_average_window: 10,
+        is_ph_enabled: true,
+        is_ec_enabled: true,
+        is_temp_enabled: true,
+        is_water_level_enabled: true,
+        last_calibrated: Utc::now(),
+    });
+
+    // 🟢 ĐÃ SỬA: Đóng gói lại thành cấu trúc lồng nhau (UnifiedConfigRequest)
+    // Cấu trúc này sẽ khớp 100% với JSON mà file Settings.tsx đang mong đợi
+    let response_payload = UnifiedConfigRequest {
+        device_config: dev,
+        water_config: water,
+        safety_config: safe,
+        sensor_calibration: sens,
+        dosing_calibration: dose,
+    };
+
+    HttpResponse::Ok().json(response_payload)
 }
 
 #[instrument(skip(app_state))]
@@ -601,4 +693,3 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(update_dosing_calibration),
         );
 }
-
