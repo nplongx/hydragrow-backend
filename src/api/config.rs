@@ -78,7 +78,6 @@ async fn fetch_unified_mqtt_config(
         ec_offset: 0.0,
         temp_offset: 0.0,
         temp_compensation_beta: 0.02,
-        sampling_interval: 1000,
         publish_interval: 5000,
         moving_average_window: 10,
         is_ph_enabled: true,
@@ -237,13 +236,13 @@ async fn upsert_sensor_db(
         r#"
         INSERT INTO sensor_calibration (
             device_id, ph_v7, ph_v4, ec_factor, ec_offset, temp_offset,
-            temp_compensation_beta, sampling_interval, publish_interval, moving_average_window,
+            temp_compensation_beta, publish_interval, moving_average_window,
             is_ph_enabled, is_ec_enabled, is_temp_enabled, is_water_level_enabled, last_calibrated
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         ON CONFLICT(device_id) DO UPDATE SET
             ph_v7 = EXCLUDED.ph_v7, ph_v4 = EXCLUDED.ph_v4, ec_factor = EXCLUDED.ec_factor,
             ec_offset = EXCLUDED.ec_offset, temp_offset = EXCLUDED.temp_offset,
-            temp_compensation_beta = EXCLUDED.temp_compensation_beta, sampling_interval = EXCLUDED.sampling_interval,
+            temp_compensation_beta = EXCLUDED.temp_compensation_beta,
             publish_interval = EXCLUDED.publish_interval, moving_average_window = EXCLUDED.moving_average_window,
             is_ph_enabled = EXCLUDED.is_ph_enabled, is_ec_enabled = EXCLUDED.is_ec_enabled,
             is_temp_enabled = EXCLUDED.is_temp_enabled, is_water_level_enabled = EXCLUDED.is_water_level_enabled,
@@ -257,7 +256,6 @@ async fn upsert_sensor_db(
     .bind(cal.ec_offset)
     .bind(cal.temp_offset)
     .bind(cal.temp_compensation_beta)
-    .bind(cal.sampling_interval)
     .bind(cal.publish_interval)
     .bind(cal.moving_average_window)
     .bind(cal.is_ph_enabled)
@@ -480,7 +478,6 @@ pub async fn get_unified_device_config(
         ec_offset: 0.0,
         temp_offset: 0.0,
         temp_compensation_beta: 0.02,
-        sampling_interval: 1000,
         publish_interval: 5000,
         moving_average_window: 10,
         is_ph_enabled: true,
