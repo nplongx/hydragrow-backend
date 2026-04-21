@@ -114,7 +114,6 @@ pub async fn sync_config_to_esp32(
         .map_err(|e| format!("Lỗi gửi MQTT Controller: {:?}", e))?;
 
     // 2. GỬI CẤU HÌNH CẢM BIẾN RIÊNG CHO SENSOR NODE
-    // Truy vấn lại riêng phần sensor để cấu trúc lại JSON map thẳng với C++ code
     let sens = sqlx::query_as::<_, SensorCalibration>(
         "SELECT * FROM sensor_calibration WHERE device_id = $1",
     )
@@ -127,7 +126,6 @@ pub async fn sync_config_to_esp32(
     if let Some(sensor_config) = sens {
         let mqtt_topic_sensor = format!("AGITECH/{}/sensors/config", device_id);
 
-        // Tạo JSON Payload bám sát biến C++ của Sensor Node để tối ưu dung lượng và parse nhanh hơn
         let sensor_payload = json!({
             "ph_v7": sensor_config.ph_v7,
             "ph_v4": sensor_config.ph_v4,
@@ -140,7 +138,9 @@ pub async fn sync_config_to_esp32(
             "en_ph": sensor_config.is_ph_enabled,
             "en_ec": sensor_config.is_ec_enabled,
             "en_temp": sensor_config.is_temp_enabled,
-            "en_water": sensor_config.is_water_level_enabled
+            "en_water": sensor_config.is_water_level_enabled,
+            // Thêm field tank_height cho siêu âm nếu cần từ bảng water
+            "tank_height": payload.tank_height
         });
 
         if let Ok(mqtt_bytes_sensor) = serde_json::to_vec(&sensor_payload) {
@@ -169,6 +169,7 @@ async fn upsert_water_db(
     config: &WaterConfig,
     now: &chrono::DateTime<chrono::Utc>,
 ) -> Result<(), sqlx::Error> {
+    // 🟢 SỬA SQL QUERY BẢNG WATER (Dùng water_change_cron)
     sqlx::query(
         r#"
         INSERT INTO water_config (
@@ -176,7 +177,7 @@ async fn upsert_water_db(
             water_level_drain, circulation_mode, circulation_on_sec,
             circulation_off_sec, water_level_tolerance, auto_refill_enabled,
             auto_drain_overflow, auto_dilute_enabled, dilute_drain_amount_cm,
-            scheduled_water_change_enabled, water_change_interval_sec, scheduled_drain_amount_cm,
+            scheduled_water_change_enabled, water_change_cron, scheduled_drain_amount_cm,
             misting_on_duration_ms, misting_off_duration_ms, last_updated
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         ON CONFLICT(device_id) DO UPDATE SET
@@ -194,7 +195,7 @@ async fn upsert_water_db(
             auto_dilute_enabled = EXCLUDED.auto_dilute_enabled, 
             dilute_drain_amount_cm = EXCLUDED.dilute_drain_amount_cm,
             scheduled_water_change_enabled = EXCLUDED.scheduled_water_change_enabled,
-            water_change_interval_sec = EXCLUDED.water_change_interval_sec,
+            water_change_cron = EXCLUDED.water_change_cron,
             scheduled_drain_amount_cm = EXCLUDED.scheduled_drain_amount_cm, 
             misting_on_duration_ms = EXCLUDED.misting_on_duration_ms,
             misting_off_duration_ms = EXCLUDED.misting_off_duration_ms,
@@ -202,6 +203,7 @@ async fn upsert_water_db(
         "#,
     )
     .bind(&config.device_id)
+    .bind(config.tank_height)
     .bind(config.water_level_min)
     .bind(config.water_level_target)
     .bind(config.water_level_max)
@@ -215,7 +217,7 @@ async fn upsert_water_db(
     .bind(config.auto_dilute_enabled)
     .bind(config.dilute_drain_amount_cm)
     .bind(config.scheduled_water_change_enabled)
-    .bind(config.water_change_interval_sec)
+    .bind(&config.water_change_cron)
     .bind(config.scheduled_drain_amount_cm)
     .bind(config.misting_on_duration_ms)
     .bind(config.misting_off_duration_ms)
@@ -271,24 +273,35 @@ async fn upsert_dosing_db(
     cal: &DosingCalibration,
     now: &chrono::DateTime<chrono::Utc>,
 ) -> Result<(), sqlx::Error> {
+    // 🟢 SỬA SQL QUERY BẢNG DOSING (Dùng cron và 4 cột bơm mới)
     sqlx::query(
         r#"
         INSERT INTO dosing_calibration (
             device_id, tank_volume_l, ec_gain_per_ml, ph_shift_up_per_ml,
             ph_shift_down_per_ml, active_mixing_sec, sensor_stabilize_sec, ec_step_ratio, ph_step_ratio, 
-            dosing_pump_capacity_ml_per_sec, soft_start_duration, last_calibrated, 
+            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec,
+            pump_ph_up_capacity_ml_per_sec, pump_ph_down_capacity_ml_per_sec,
+            soft_start_duration, last_calibrated, 
             scheduled_mixing_interval_sec, scheduled_mixing_duration_sec,
-            dosing_pwm_percent, osaka_mixing_pwm_percent, osaka_misting_pwm_percent
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            dosing_pwm_percent, osaka_mixing_pwm_percent, osaka_misting_pwm_percent,
+            scheduled_dosing_enabled, scheduled_dosing_cron, scheduled_dose_a_ml, scheduled_dose_b_ml
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
         ON CONFLICT(device_id) DO UPDATE SET
             tank_volume_l = EXCLUDED.tank_volume_l, ec_gain_per_ml = EXCLUDED.ec_gain_per_ml,
             ph_shift_up_per_ml = EXCLUDED.ph_shift_up_per_ml, ph_shift_down_per_ml = EXCLUDED.ph_shift_down_per_ml,
             active_mixing_sec = EXCLUDED.active_mixing_sec, sensor_stabilize_sec = EXCLUDED.sensor_stabilize_sec,
             ec_step_ratio = EXCLUDED.ec_step_ratio, ph_step_ratio = EXCLUDED.ph_step_ratio, 
-            dosing_pump_capacity_ml_per_sec = EXCLUDED.dosing_pump_capacity_ml_per_sec,
+            pump_a_capacity_ml_per_sec = EXCLUDED.pump_a_capacity_ml_per_sec,
+            pump_b_capacity_ml_per_sec = EXCLUDED.pump_b_capacity_ml_per_sec,
+            pump_ph_up_capacity_ml_per_sec = EXCLUDED.pump_ph_up_capacity_ml_per_sec,
+            pump_ph_down_capacity_ml_per_sec = EXCLUDED.pump_ph_down_capacity_ml_per_sec,
             soft_start_duration = EXCLUDED.soft_start_duration, scheduled_mixing_interval_sec = EXCLUDED.scheduled_mixing_interval_sec,
             scheduled_mixing_duration_sec = EXCLUDED.scheduled_mixing_duration_sec, dosing_pwm_percent = EXCLUDED.dosing_pwm_percent,
             osaka_mixing_pwm_percent = EXCLUDED.osaka_mixing_pwm_percent, osaka_misting_pwm_percent = EXCLUDED.osaka_misting_pwm_percent,
+            scheduled_dosing_enabled = EXCLUDED.scheduled_dosing_enabled,
+            scheduled_dosing_cron = EXCLUDED.scheduled_dosing_cron,
+            scheduled_dose_a_ml = EXCLUDED.scheduled_dose_a_ml,
+            scheduled_dose_b_ml = EXCLUDED.scheduled_dose_b_ml,
             last_calibrated = EXCLUDED.last_calibrated
         "#
     )
@@ -301,7 +314,10 @@ async fn upsert_dosing_db(
     .bind(cal.sensor_stabilize_sec)
     .bind(cal.ec_step_ratio)
     .bind(cal.ph_step_ratio)
-    .bind(cal.dosing_pump_capacity_ml_per_sec)
+    .bind(cal.pump_a_capacity_ml_per_sec)
+    .bind(cal.pump_b_capacity_ml_per_sec)
+    .bind(cal.pump_ph_up_capacity_ml_per_sec)
+    .bind(cal.pump_ph_down_capacity_ml_per_sec)
     .bind(cal.soft_start_duration)
     .bind(now)
     .bind(cal.scheduled_mixing_interval_sec)
@@ -309,6 +325,10 @@ async fn upsert_dosing_db(
     .bind(cal.dosing_pwm_percent)
     .bind(cal.osaka_mixing_pwm_percent)
     .bind(cal.osaka_misting_pwm_percent)
+    .bind(cal.scheduled_dosing_enabled)
+    .bind(&cal.scheduled_dosing_cron)
+    .bind(cal.scheduled_dose_a_ml)
+    .bind(cal.scheduled_dose_b_ml)
     .execute(pool).await?;
     Ok(())
 }
@@ -581,3 +601,4 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(update_dosing_calibration),
         );
 }
+

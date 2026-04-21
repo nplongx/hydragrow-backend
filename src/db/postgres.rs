@@ -23,12 +23,12 @@ pub struct BlockchainRecord {
 
 #[instrument(skip(pool))]
 pub async fn get_device_config(pool: &PgPool, device_id: &str) -> Result<DeviceConfig> {
+    // 🟢 ĐÃ SỬA: Bỏ pump_a_capacity_ml_per_sec và pump_b_capacity_ml_per_sec (Đã chuyển sang bảng dosing)
     let config = sqlx::query_as::<_, DeviceConfig>(
         r#"SELECT
             device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
             temp_target, temp_tolerance, control_mode, is_enabled, 
-            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec,
-            last_updated
+            delay_between_a_and_b_sec, last_updated
         FROM device_config WHERE device_id = $1"#,
     )
     .bind(device_id)
@@ -41,14 +41,14 @@ pub async fn get_device_config(pool: &PgPool, device_id: &str) -> Result<DeviceC
 
 #[instrument(skip(pool, config))]
 pub async fn upsert_device_config(pool: &PgPool, config: &DeviceConfig) -> Result<()> {
+    // 🟢 ĐÃ SỬA: Bỏ các tham số liên quan đến pump_capacity
     sqlx::query(
         r#"
         INSERT INTO device_config (
             device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
             temp_target, temp_tolerance, control_mode, is_enabled, 
-            pump_a_capacity_ml_per_sec, pump_b_capacity_ml_per_sec, delay_between_a_and_b_sec,
-            last_updated
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            delay_between_a_and_b_sec, last_updated
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ON CONFLICT(device_id) DO UPDATE SET
             ec_target = EXCLUDED.ec_target,
             ec_tolerance = EXCLUDED.ec_tolerance,
@@ -58,8 +58,6 @@ pub async fn upsert_device_config(pool: &PgPool, config: &DeviceConfig) -> Resul
             temp_tolerance = EXCLUDED.temp_tolerance,
             control_mode = EXCLUDED.control_mode,
             is_enabled = EXCLUDED.is_enabled,
-            pump_a_capacity_ml_per_sec = EXCLUDED.pump_a_capacity_ml_per_sec,
-            pump_b_capacity_ml_per_sec = EXCLUDED.pump_b_capacity_ml_per_sec,
             delay_between_a_and_b_sec = EXCLUDED.delay_between_a_and_b_sec,   
             last_updated = EXCLUDED.last_updated
         "#,
@@ -73,8 +71,6 @@ pub async fn upsert_device_config(pool: &PgPool, config: &DeviceConfig) -> Resul
     .bind(config.temp_tolerance)
     .bind(&config.control_mode)
     .bind(config.is_enabled)
-    .bind(config.pump_a_capacity_ml_per_sec)
-    .bind(config.pump_b_capacity_ml_per_sec)
     .bind(config.delay_between_a_and_b_sec)
     .bind(&config.last_updated)
     .execute(pool)
