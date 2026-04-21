@@ -8,8 +8,8 @@ pub struct DeviceConfig {
     pub device_id: String,
     pub ec_target: f32,
     pub ec_tolerance: f32,
-    pub ph_target: f32,
     pub ph_tolerance: f32,
+    pub ph_target: f32,
     pub temp_target: f32,
     pub temp_tolerance: f32,
     pub control_mode: String,
@@ -385,4 +385,3 @@ impl MqttConfigPayload {
         }
     }
 }
-
