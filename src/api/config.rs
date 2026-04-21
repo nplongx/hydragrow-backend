@@ -135,10 +135,11 @@ pub async fn sync_config_to_esp32(
             "temp_compensation_beta": sensor_config.temp_compensation_beta,
             "moving_average_window": sensor_config.moving_average_window,
             "publish_interval": sensor_config.publish_interval,
-            "en_ph": sensor_config.is_ph_enabled,
-            "en_ec": sensor_config.is_ec_enabled,
-            "en_temp": sensor_config.is_temp_enabled,
-            "en_water": sensor_config.is_water_level_enabled,
+
+            "enable_ph_sensor": sensor_config.is_ph_enabled,
+            "enable_ec_sensor": sensor_config.is_ec_enabled,
+            "enable_temp_sensor": sensor_config.is_temp_enabled,
+            "enable_water_level_sensor": sensor_config.is_water_level_enabled,
             // Thêm field tank_height cho siêu âm nếu cần từ bảng water
             "tank_height": payload.tank_height
         });

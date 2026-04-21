@@ -38,13 +38,10 @@ struct FsmPayload {
 // Trong src/mqtt/handler.rs (Backend)
 #[derive(Debug, Deserialize)]
 pub struct IncomingSensorPayload {
-    #[serde(rename = "temp_value")]
     pub temp: Option<f64>,
 
-    #[serde(rename = "ec_value")]
     pub ec: Option<f64>,
 
-    #[serde(rename = "ph_value")]
     pub ph: Option<f64>,
 
     pub water_level: Option<f64>,
