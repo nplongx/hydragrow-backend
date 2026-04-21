@@ -264,6 +264,16 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         });
                     }
+                    s if s.starts_with("EmergencyStop:") => {
+                        let reason = s.replace("EmergencyStop:", "");
+                        alert = Some(AlertMessage {
+                            level: "critical".to_string(),
+                            title: "Dừng Khẩn Cấp!".to_string(),
+                            message: format!("Hệ thống bị ngắt khẩn cấp. Lý do: {}", reason),
+                            device_id: device_id.clone(),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        });
+                    }
 
                     // --- CÁC TRẠNG THÁI CŨ GIỮ NGUYÊN ---
                     "EmergencyStop" => {
