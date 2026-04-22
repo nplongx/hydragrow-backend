@@ -76,14 +76,31 @@ pub async fn ws_handler(
                     }
                 }
 
-                // 🟢 MỚI: LUỒNG NGHE DEVICE HEALTH (Uptime, Ram, Rssi, PumpStatus...)
+                // Sửa luồng health_result trong tokio::select!
                 health_result = health_rx.recv() => {
                     match health_result {
                         Ok(health_data) => {
-                            let ws_msg = serde_json::json!({
-                                "type": "device_health",
-                                "payload": health_data
-                            });
+                            // Kiểm tra xem đây là Health hay là Status mượn đường
+                            let is_status_msg = health_data.get("_msg_type")
+                                .and_then(|v| v.as_str())
+                                .map_or(false, |s| s == "device_status");
+
+                            let ws_msg = if is_status_msg {
+                                // Khớp đúng với WsMessage::DeviceStatus ở Tauri Client
+                                serde_json::json!({
+                                    "type": "device_status",
+                                    "payload": {
+                                        "is_online": health_data["is_online"],
+                                        "last_seen": health_data["last_seen"]
+                                    }
+                                })
+                            } else {
+                                // Gói tin sức khoẻ thiết bị thông thường
+                                serde_json::json!({
+                                    "type": "device_health",
+                                    "payload": health_data
+                                })
+                            };
 
                             if let Ok(json_str) = serde_json::to_string(&ws_msg) {
                                 if session.text(json_str).await.is_err() {
@@ -126,4 +143,3 @@ pub async fn ws_handler(
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/ws", web::get().to(ws_handler));
 }
-

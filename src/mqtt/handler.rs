@@ -206,6 +206,14 @@ async fn handle_device_status(
         metadata: None,
     };
     let _ = app_state.alert_sender.send(alert);
+
+    let status_payload = serde_json::json!({
+        "_msg_type": "device_status",
+        "is_online": status.online,
+        "last_seen": chrono::Utc::now().to_rfc3339()
+    });
+    // Lợi dụng health_sender để bắn gói tin này đi vì channel này hỗ trợ kiểu Value linh hoạt
+    let _ = app_state.health_sender.send(status_payload);
 }
 
 async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
@@ -565,3 +573,4 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
         }
     }
 }
+
