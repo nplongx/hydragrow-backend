@@ -1,8 +1,4 @@
-use std::any::Any;
-use std::time::UNIX_EPOCH;
-
 use actix_web::web;
-use chrono::{DateTime, Utc};
 use rumqttc::Publish;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -12,7 +8,6 @@ use crate::AppState;
 use crate::db::influx::write_sensor_data;
 use crate::models::alert::AlertMessage;
 use crate::models::sensor::{PumpStatus, SensorData};
-use crate::services::solana::SolanaTraceability;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DosingReportPayload {
@@ -29,11 +24,6 @@ pub struct DosingReportPayload {
 #[derive(Deserialize)]
 struct DeviceStatusPayload {
     pub online: bool,
-}
-
-#[derive(Deserialize)]
-struct FsmPayload {
-    pub current_state: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,34 +48,44 @@ pub struct IncomingSensorPayload {
     pub is_continuous: Option<bool>,
 }
 
+/// Extracts (device_id, suffix) from a topic like "AGITECH/device_001/sensors"
+/// Returns None if the topic doesn't start with "AGITECH/".
+fn parse_agitech_topic(topic: &str) -> Option<(String, String)> {
+    let prefix = "AGITECH/";
+    if !topic.starts_with(prefix) {
+        return None;
+    }
+    let rest = &topic[prefix.len()..];
+    // rest is now "device_001/sensors" or similar
+    let slash = rest.find('/')?;
+    let device_id = rest[..slash].to_string();
+    let suffix = rest[slash..].to_string(); // includes leading slash, e.g. "/sensors"
+    Some((device_id, suffix))
+}
+
 #[instrument(skip(app_state, publish))]
 pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
     let topic = publish.topic.clone();
     let payload_bytes = publish.payload;
 
-    let parts: Vec<&str> = topic.split('/').collect();
-    // 🟢 SỬA LẠI: Cho phép topic có độ dài > 3 (ví dụ: AGITECH/device_001/controller/status)
-    if parts.len() < 3 || parts[0] != "AGITECH" {
-        warn!("Bỏ qua topic không đúng chuẩn hệ thống: {}", topic);
-        return;
-    }
+    let (device_id, suffix) = match parse_agitech_topic(&topic) {
+        Some(v) => v,
+        None => {
+            warn!("Bỏ qua topic không đúng chuẩn hệ thống: {}", topic);
+            return;
+        }
+    };
 
-    let device_id = parts[1].to_string();
-
-    // Lấy phần đuôi của topic để match (Bắt đầu từ sau AGITECH/device_id)
-    let prefix_len = "AGITECH/".len() + device_id.len();
-    let action_path = &topic[prefix_len..];
-
-    match action_path {
+    match suffix.as_str() {
         "/sensors" => {
             handle_sensor_data(device_id, &payload_bytes, app_state).await;
         }
         "/status" => {
-            // LWT của Controller
+            // LWT của Controller Node
             handle_device_status(device_id, "Trạm Điều Khiển", &payload_bytes, app_state).await;
         }
         "/sensor/status" => {
-            // LWT của Sensor
+            // LWT của Sensor Node
             handle_device_status(device_id, "Mạch Cảm Biến", &payload_bytes, app_state).await;
         }
         "/fsm" => {
@@ -95,7 +95,7 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
             handle_dosing_report(device_id, &payload_bytes, app_state).await;
         }
         "/controller/status" => {
-            // 🟢 MỚI: Bắt bản tin Sức Khỏe của Controller và đẩy thẳng ra WS
+            // Periodic health heartbeat from the Controller Node
             if let Ok(payload_json) = serde_json::from_slice::<serde_json::Value>(&payload_bytes) {
                 let _ = app_state.health_sender.send(payload_json);
             } else {
@@ -167,7 +167,14 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
     let _ = app_state.sensor_sender.send(sensor_data);
 }
 
-// Thêm tham số node_type: &str
+/// Handles LWT-style status messages from either the Controller or Sensor node.
+///
+/// We send the status via TWO channels so the frontend can always receive it:
+///   1. `alert_sender`  — goes through the "alert" WS message path (legacy support)
+///   2. `health_sender` — goes through the "device_status" WS message path (preferred)
+///
+/// The frontend's DeviceContext handles both paths and calls `resetControllerTimeout()`
+/// on either, so there is no race between the two.
 async fn handle_device_status(
     device_id: String,
     node_type: &str,
@@ -177,24 +184,37 @@ async fn handle_device_status(
     let status: DeviceStatusPayload = match serde_json::from_slice(payload) {
         Ok(data) => data,
         Err(e) => {
-            error!("Lỗi parse DeviceStatus từ {}: {:?}", device_id, e);
+            error!(
+                "Lỗi parse DeviceStatus từ {} ({}): {:?}",
+                device_id, node_type, e
+            );
             return;
         }
     };
 
+    let is_online = status.online;
+    let now_iso = chrono::Utc::now().to_rfc3339();
+
+    info!(
+        "[{}] {} trạng thái: {}",
+        device_id,
+        node_type,
+        if is_online { "ONLINE" } else { "OFFLINE (LWT)" }
+    );
+
+    // ── 1. Send via alert_sender (renders in SystemLog, legacy WS path) ───────
     let alert = AlertMessage {
-        level: if status.online {
+        level: if is_online {
             "success".to_string()
         } else {
             "warning".to_string()
         },
-        // 🟢 TIÊU ĐỀ SẼ LÀ: "Trạng thái Trạm Điều Khiển" hoặc "Trạng thái Mạch Cảm Biến"
         title: format!("Trạng thái {}", node_type),
         message: format!(
             "{} ({}) vừa {}",
             node_type,
             device_id,
-            if status.online {
+            if is_online {
                 "Trực tuyến"
             } else {
                 "Mất kết nối"
@@ -207,12 +227,15 @@ async fn handle_device_status(
     };
     let _ = app_state.alert_sender.send(alert);
 
+    // ── 2. Send via health_sender as a proper device_status packet ────────────
+    // The WS handler (ws.rs) checks for `_msg_type == "device_status"` and
+    // re-wraps this as { type: "device_status", payload: { is_online, last_seen } }
+    // which the frontend DeviceContext handles in the `data.type === 'device_status'` branch.
     let status_payload = serde_json::json!({
         "_msg_type": "device_status",
-        "is_online": status.online,
-        "last_seen": chrono::Utc::now().to_rfc3339()
+        "is_online": is_online,
+        "last_seen": now_iso
     });
-    // Lợi dụng health_sender để bắn gói tin này đi vì channel này hỗ trợ kiểu Value linh hoạt
     let _ = app_state.health_sender.send(status_payload);
 }
 
@@ -223,6 +246,7 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
     match serde_json::from_slice::<serde_json::Value>(payload) {
         Ok(json) => {
             if let Some(state) = json["current_state"].as_str() {
+                // Always broadcast FSM state to frontend first
                 let fsm_sync_msg = AlertMessage {
                     level: "FSM_UPDATE".to_string(),
                     title: "FSM_SYNC".to_string(),
@@ -234,7 +258,7 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                 };
                 let _ = app_state.alert_sender.send(fsm_sync_msg);
 
-                let mut alert = None;
+                let mut alert: Option<AlertMessage> = None;
 
                 let current_sensors = app_state.device_states.read().await;
                 let metadata_json = if let Some(sensor_str) = current_sensors.get(&device_id) {
@@ -460,11 +484,7 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
 
                     if alert_msg.level == "critical" || alert_msg.level == "warning" {
                         let tokens = app_state.fcm_tokens.lock().unwrap().clone();
-                        if tokens.is_empty() {
-                            warn!(
-                                "⚠️ Không có FCM Token nào trong RAM! Không thể gửi Push Notification."
-                            );
-                        } else {
+                        if !tokens.is_empty() {
                             tokio::spawn(async move {
                                 crate::services::fcm::send_push_notification(
                                     &alert_msg.title,
@@ -502,8 +522,8 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
 
     let season_id_str =
         match crate::db::postgres::get_active_crop_season(&app_state.pg_pool, &device_id).await {
-            Ok(season) => season.unwrap().id.to_string(),
-            Err(_) => "".to_string(),
+            Ok(Some(season)) => season.id.to_string(),
+            _ => "".to_string(),
         };
 
     let blockchain_payload = json!({
