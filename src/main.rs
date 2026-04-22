@@ -4,7 +4,7 @@ use dotenvy::dotenv;
 use influxdb2::Client as InfluxClient;
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde::Serialize;
-use sqlx::postgres::PgPoolOptions; // 🟢 ĐỔI TỪ SqlitePoolOptions
+use sqlx::postgres::PgPoolOptions;
 use std::{
     collections::HashMap,
     env, fs,
@@ -30,7 +30,7 @@ pub mod mqtt;
 pub mod services;
 
 pub struct AppState {
-    pub pg_pool: sqlx::PgPool, // 🟢 ĐỔI TỪ sqlite_pool THÀNH pg_pool
+    pub pg_pool: sqlx::PgPool,
     pub influx_client: InfluxClient,
     pub influx_bucket: String,
     pub mqtt_client: AsyncClient,
@@ -39,7 +39,7 @@ pub struct AppState {
     pub device_states: std::sync::Arc<RwLock<HashMap<String, String>>>,
     pub solana_traceability: SolanaTraceability,
     pub sensor_sender: broadcast::Sender<SensorData>,
-    pub health_sender: broadcast::Sender<serde_json::Value>, // 🟢 Thêm dòng này
+    pub health_sender: broadcast::Sender<serde_json::Value>,
     pub fcm_tokens: Mutex<Vec<String>>,
 }
 
@@ -55,11 +55,16 @@ async fn main() -> anyhow::Result<()> {
     info!("Bắt đầu khởi động hệ thống IoT Hydroponics...");
 
     let database_url = env::var("DATABASE_URL").expect("Thiếu biến DATABASE_URL");
-    // 🟢 SỬ DỤNG PgPoolOptions
     let pg_pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
         .await?;
+
+    // Chạy migration tự động
+    // sqlx::migrate!("./migrations")
+    //     .run(&pg_pool)
+    //     .await
+    //     .context("Lỗi chạy migration DB")?;
 
     let influx_url = env::var("INFLUX_URL").expect("Thiếu biến INFLUX_URL");
     let influx_org = env::var("INFLUX_ORG").expect("Thiếu biến INFLUX_ORG");
@@ -98,40 +103,45 @@ async fn main() -> anyhow::Result<()> {
 
     let (health_tx, _) = broadcast::channel(100);
 
-    let db_pool_clone = pg_pool.clone(); // 🟢 SỬ DỤNG pg_pool
+    let db_pool_clone = pg_pool.clone();
 
-    // 🟢 ĐÃ SỬA: Map AlertMessage sang SystemEventRecord trước khi lưu
+    // Lắng nghe alert và lưu vào DB dùng NewSystemEventRecord (không cần id)
     tokio::spawn(async move {
         while let Ok(alert) = alert_rx_for_db.recv().await {
-            if alert.level != "FSM_UPDATE" {
-                // 🟢 Tự động phân loại category dựa vào level của cảnh báo
-                let category = if alert.level == "critical" || alert.level == "warning" {
-                    "alert".to_string()
-                } else if alert.title.contains("Châm Phân") || alert.title.contains("pH") {
-                    "dosing".to_string()
-                } else {
-                    "system".to_string()
-                };
+            // Bỏ qua FSM_UPDATE thuần (chỉ dùng để đồng bộ badge trên FE)
+            if alert.level == "FSM_UPDATE" {
+                continue;
+            }
 
-                // Khởi tạo struct tương thích với Database
-                let record = crate::db::postgres::SystemEventRecord {
-                    id: uuid::Uuid::new_v4().to_string(), // 🟢 Sinh ID ngẫu nhiên làm Primary Key
-                    category,                             // 🟢 Thêm phân loại
-                    device_id: alert.device_id.clone(),
-                    level: alert.level.clone(),
-                    title: alert.title.clone(),
-                    message: alert.message.clone(),
-                    timestamp: alert.timestamp as i64,
-                    reason: alert.reason.clone(),
-                    metadata: alert.metadata.clone(),
-                };
+            // Phân loại category dựa theo nội dung alert
+            let category = if alert.level == "critical" || alert.level == "warning" {
+                "alert".to_string()
+            } else if alert.title.contains("Châm Phân")
+                || alert.title.contains("pH")
+                || alert.title.contains("Blockchain")
+            {
+                "dosing".to_string()
+            } else if alert.title.contains("Trạng thái") || alert.title.contains("Kết Nối") {
+                "system".to_string()
+            } else {
+                "system".to_string()
+            };
 
-                // Đẩy record đã chuyển đổi vào Database
-                if let Err(e) =
-                    crate::db::postgres::insert_system_event(&db_pool_clone, &record).await
-                {
-                    tracing::error!("Lỗi ghi System Event vào DB: {:?}", e);
-                }
+            // Dùng NewSystemEventRecord – id do SERIAL tự sinh
+            let record = crate::db::postgres::NewSystemEventRecord {
+                category,
+                device_id: alert.device_id.clone(),
+                level: alert.level.clone(),
+                title: alert.title.clone(),
+                message: alert.message.clone(),
+                timestamp: alert.timestamp as i64,
+                reason: alert.reason.clone(),
+                metadata: alert.metadata.clone(),
+            };
+
+            if let Err(e) = crate::db::postgres::insert_system_event(&db_pool_clone, &record).await
+            {
+                tracing::error!("Lỗi ghi System Event vào DB: {:?}", e);
             }
         }
     });
@@ -141,7 +151,7 @@ async fn main() -> anyhow::Result<()> {
     let device_states = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
     let app_state = web::Data::new(AppState {
-        pg_pool, // 🟢 ĐƯA pg_pool VÀO APPSTATE
+        pg_pool,
         influx_client,
         influx_bucket,
         mqtt_client: mqtt_client.clone(),

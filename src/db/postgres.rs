@@ -1,14 +1,15 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{Error, Executor, FromRow, PgPool, Row}; // 🟢 Thêm Executor
+use sqlx::{Error, Executor, FromRow, PgPool, Row};
 use tracing::instrument;
 
 use crate::models::alert::AlertMessage;
 use crate::models::config::{DeviceConfig, SafetyConfig};
 use crate::models::crop_season::{CreateCropSeasonRequest, CropSeason};
 
-// 🟢 1. Cấu trúc Blockchain Record
+// ─── Blockchain ───────────────────────────────────────────────────────────────
+
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct BlockchainRecord {
     pub id: i32,
@@ -19,28 +20,42 @@ pub struct BlockchainRecord {
     pub created_at: DateTime<Utc>,
 }
 
-// 🟢 MỚI: Cấu trúc System Event Log (Đồng bộ với Frontend)
-#[derive(Debug, Serialize, Deserialize, FromRow)]
-pub struct SystemEventRecord {
-    pub id: String,
+// ─── System Events ────────────────────────────────────────────────────────────
+
+/// Struct dùng để GHI vào DB (không có id – SERIAL tự sinh).
+pub struct NewSystemEventRecord {
     pub device_id: String,
     pub level: String,
-    pub category: String, // 'system', 'dosing', 'fsm', 'alert'
+    pub category: String,
     pub title: String,
     pub message: String,
     pub reason: Option<String>,
-    pub metadata: Option<serde_json::Value>, // 🟢 Lưu JSONB để Frontend render chi tiết
+    pub metadata: Option<serde_json::Value>,
     pub timestamp: i64,
 }
 
-/// --- DEVICE CONFIG ---
+/// Struct dùng để ĐỌC từ DB (id là i32 do SERIAL).
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct SystemEventRecord {
+    pub id: i32,
+    pub device_id: String,
+    pub level: String,
+    pub category: String,
+    pub title: String,
+    pub message: String,
+    pub reason: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+    pub timestamp: i64,
+}
+
+// ─── Device Config ────────────────────────────────────────────────────────────
 
 #[instrument(skip(pool))]
 pub async fn get_device_config(pool: &PgPool, device_id: &str) -> Result<DeviceConfig> {
     let config = sqlx::query_as::<_, DeviceConfig>(
         r#"SELECT
-            device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
-            temp_target, temp_tolerance, control_mode, is_enabled, 
+            device_id, ec_target, ec_tolerance, ph_target, ph_tolerance,
+            temp_target, temp_tolerance, control_mode, is_enabled,
             delay_between_a_and_b_sec, last_updated
         FROM device_config WHERE device_id = $1"#,
     )
@@ -52,7 +67,6 @@ pub async fn get_device_config(pool: &PgPool, device_id: &str) -> Result<DeviceC
     Ok(config)
 }
 
-// 🟢 SỬA: Đổi pool: &PgPool thành executor: impl Executor để hỗ trợ Transaction
 #[instrument(skip(executor, config))]
 pub async fn upsert_device_config(
     executor: impl Executor<'_, Database = sqlx::Postgres>,
@@ -61,8 +75,8 @@ pub async fn upsert_device_config(
     sqlx::query(
         r#"
         INSERT INTO device_config (
-            device_id, ec_target, ec_tolerance, ph_target, ph_tolerance, 
-            temp_target, temp_tolerance, control_mode, is_enabled, 
+            device_id, ec_target, ec_tolerance, ph_target, ph_tolerance,
+            temp_target, temp_tolerance, control_mode, is_enabled,
             delay_between_a_and_b_sec, last_updated
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ON CONFLICT(device_id) DO UPDATE SET
@@ -74,7 +88,7 @@ pub async fn upsert_device_config(
             temp_tolerance = EXCLUDED.temp_tolerance,
             control_mode = EXCLUDED.control_mode,
             is_enabled = EXCLUDED.is_enabled,
-            delay_between_a_and_b_sec = EXCLUDED.delay_between_a_and_b_sec,   
+            delay_between_a_and_b_sec = EXCLUDED.delay_between_a_and_b_sec,
             last_updated = EXCLUDED.last_updated
         "#,
     )
@@ -89,14 +103,14 @@ pub async fn upsert_device_config(
     .bind(config.is_enabled)
     .bind(config.delay_between_a_and_b_sec)
     .bind(&config.last_updated)
-    .execute(executor) // Chạy trên Executor (có thể là Pool hoặc Transaction)
+    .execute(executor)
     .await
     .context("Failed to upsert device_config")?;
 
     Ok(())
 }
 
-/// --- SAFETY CONFIG ---
+// ─── Safety Config ────────────────────────────────────────────────────────────
 
 #[instrument(skip(pool))]
 pub async fn get_safety_config(pool: &PgPool, device_id: &str) -> Result<SafetyConfig> {
@@ -120,7 +134,6 @@ pub async fn get_safety_config(pool: &PgPool, device_id: &str) -> Result<SafetyC
     Ok(config)
 }
 
-// 🟢 SỬA: Hỗ trợ Transaction
 #[instrument(skip(executor, config))]
 pub async fn upsert_safety_config(
     executor: impl Executor<'_, Database = sqlx::Postgres>,
@@ -182,13 +195,13 @@ pub async fn upsert_safety_config(
     .bind(config.ph_ack_threshold)
     .bind(config.water_ack_threshold)
     .bind(&config.last_updated)
-    .execute(executor) // Chạy trên Executor
+    .execute(executor)
     .await?;
 
     Ok(())
 }
 
-/// --- BLOCKCHAIN HISTORY ---
+// ─── Blockchain History ───────────────────────────────────────────────────────
 
 pub async fn insert_blockchain_tx(
     pool: &PgPool,
@@ -226,7 +239,7 @@ pub async fn get_device_blockchain_history(
             .bind(s_id)
             .fetch_all(pool)
             .await
-        },
+        }
         None => {
             sqlx::query_as::<_, BlockchainRecord>(
                 r#"SELECT * FROM blockchain_logs WHERE device_id = $1 ORDER BY created_at DESC LIMIT 100"#
@@ -238,15 +251,15 @@ pub async fn get_device_blockchain_history(
     }
 }
 
-/// --- CROP SEASON ---
+// ─── Crop Season ──────────────────────────────────────────────────────────────
 
 pub async fn get_active_crop_season(
     pool: &PgPool,
     device_id: &str,
 ) -> Result<Option<CropSeason>, sqlx::Error> {
     let season = sqlx::query_as::<_, CropSeason>(
-        "SELECT id, device_id, name, plant_type, start_time::text as start_time, end_time::text as end_time, status, description 
-         FROM crop_seasons WHERE device_id = $1 AND status = 'active' LIMIT 1"
+        "SELECT id, device_id, name, plant_type, start_time::text as start_time, end_time::text as end_time, status, description
+         FROM crop_seasons WHERE device_id = $1 AND status = 'active' LIMIT 1",
     )
     .bind(device_id)
     .fetch_optional(pool)
@@ -259,8 +272,8 @@ pub async fn get_crop_seasons_history(
     device_id: &str,
 ) -> Result<Vec<CropSeason>, sqlx::Error> {
     let seasons = sqlx::query_as::<_, CropSeason>(
-        "SELECT id, device_id, name, plant_type, start_time::text as start_time, end_time::text as end_time, status, description 
-         FROM crop_seasons WHERE device_id = $1 ORDER BY start_time DESC"
+        "SELECT id, device_id, name, plant_type, start_time::text as start_time, end_time::text as end_time, status, description
+         FROM crop_seasons WHERE device_id = $1 ORDER BY start_time DESC",
     )
     .bind(device_id)
     .fetch_all(pool)
@@ -275,7 +288,7 @@ pub async fn create_crop_season(
 ) -> Result<Option<CropSeason>, sqlx::Error> {
     let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO crop_seasons (id, device_id, name, plant_type, status) VALUES ($1, $2, $3, $4, 'active')"
+        "INSERT INTO crop_seasons (id, device_id, name, plant_type, status) VALUES ($1, $2, $3, $4, 'active')",
     )
     .bind(&id)
     .bind(device_id)
@@ -289,7 +302,7 @@ pub async fn create_crop_season(
 
 pub async fn end_active_crop_season(pool: &PgPool, device_id: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE crop_seasons SET status = 'completed', end_time = CURRENT_TIMESTAMP WHERE device_id = $1 AND status = 'active'"
+        "UPDATE crop_seasons SET status = 'completed', end_time = CURRENT_TIMESTAMP WHERE device_id = $1 AND status = 'active'",
     )
     .bind(device_id)
     .execute(pool)
@@ -315,11 +328,14 @@ pub async fn update_active_crop_season(
         Some(id) => {
             let updated = sqlx::query(
                 r#"
-                UPDATE crop_seasons 
+                UPDATE crop_seasons
                 SET name = $1, plant_type = $2, description = $3
                 WHERE id = $4
-                RETURNING id, device_id, name, plant_type, start_time::text as start_time, end_time::text as end_time, status, description
-                "#
+                RETURNING id, device_id, name, plant_type,
+                          start_time::text as start_time,
+                          end_time::text as end_time,
+                          status, description
+                "#,
             )
             .bind(name)
             .bind(plant_type)
@@ -343,12 +359,12 @@ pub async fn update_active_crop_season(
     }
 }
 
-/// --- SYSTEM EVENTS ---
+// ─── System Events ────────────────────────────────────────────────────────────
 
-// 🟢 NÂNG CẤP MẠNH: Cho phép ghi Log chi tiết thay vì chỉ Alert đơn thuần
+/// Ghi một sự kiện mới vào DB. Dùng `NewSystemEventRecord` – không cần id.
 pub async fn insert_system_event(
     executor: impl Executor<'_, Database = sqlx::Postgres>,
-    log: &SystemEventRecord,
+    log: &NewSystemEventRecord,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
@@ -362,7 +378,7 @@ pub async fn insert_system_event(
     .bind(&log.title)
     .bind(&log.message)
     .bind(&log.reason)
-    .bind(&log.metadata) // SQLx sẽ tự động map serde_json::Value sang JSONB
+    .bind(&log.metadata)
     .bind(log.timestamp)
     .execute(executor)
     .await?;
@@ -370,13 +386,12 @@ pub async fn insert_system_event(
     Ok(())
 }
 
-// 🟢 NÂNG CẤP: Lấy Full dữ liệu bao gồm cả Metadata và Reason trả về cho Frontend
+/// Đọc danh sách sự kiện từ DB, trả về `SystemEventRecord` (có id i32).
 pub async fn get_system_events(
     pool: &PgPool,
     device_id: &str,
     limit: i64,
 ) -> Result<Vec<SystemEventRecord>, sqlx::Error> {
-    // Tự động map vào Struct bằng FromRow
     let events = sqlx::query_as::<_, SystemEventRecord>(
         r#"
         SELECT id, device_id, level, category, title, message, reason, metadata, timestamp
@@ -393,3 +408,4 @@ pub async fn get_system_events(
 
     Ok(events)
 }
+
