@@ -49,6 +49,17 @@ pub struct SensorData {
     // #[serde(default)]
     // pub timestamp: String,
     pub time: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rssi: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub free_heap: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uptime: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub err_water: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_continuous: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromDataPoint, Default)]
@@ -77,6 +88,11 @@ impl From<SensorDataRow> for SensorData {
 
             // ĐÃ SỬA: Format thời gian về lại String chuẩn RFC3339 cho Client
             time: row.time.to_rfc3339(),
+            rssi: None,
+            free_heap: None,
+            is_continuous: None,
+            uptime: None,
+            err_water: None,
         }
     }
 }

@@ -39,6 +39,7 @@ pub struct AppState {
     pub device_states: std::sync::Arc<RwLock<HashMap<String, String>>>,
     pub solana_traceability: SolanaTraceability,
     pub sensor_sender: broadcast::Sender<SensorData>,
+    pub health_sender: broadcast::Sender<serde_json::Value>, // 🟢 Thêm dòng này
     pub fcm_tokens: Mutex<Vec<String>>,
 }
 
@@ -95,6 +96,8 @@ async fn main() -> anyhow::Result<()> {
     let (alert_sender, _) = broadcast::channel(100);
     let mut alert_rx_for_db: Receiver<AlertMessage> = alert_sender.subscribe();
 
+    let (health_tx, _) = broadcast::channel(100);
+
     let db_pool_clone = pg_pool.clone(); // 🟢 SỬ DỤNG pg_pool
 
     // 🟢 ĐÃ SỬA: Map AlertMessage sang SystemEventRecord trước khi lưu
@@ -148,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
         solana_traceability: solana_service,
         sensor_sender,
         fcm_tokens: Mutex::new(Vec::new()),
+        health_sender: health_tx,
     });
 
     mqtt_client

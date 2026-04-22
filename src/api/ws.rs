@@ -1,7 +1,6 @@
 use actix_web::{Error, HttpRequest, HttpResponse, web};
 use actix_ws::Message;
 use futures_util::StreamExt as _;
-use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{info, warn};
 
@@ -16,6 +15,8 @@ pub async fn ws_handler(
 
     let mut alert_rx = app_state.alert_sender.subscribe();
     let mut sensor_rx = app_state.sensor_sender.subscribe();
+    // 🟢 MỚI: Đăng ký nhận dữ liệu sức khỏe thiết bị
+    let mut health_rx = app_state.health_sender.subscribe();
 
     let client_ip = req
         .connection_info()
@@ -31,17 +32,15 @@ pub async fn ws_handler(
     actix_web::rt::spawn(async move {
         loop {
             tokio::select! {
-                // 🟢 LUỒNG NGHE CÁC BẢN TIN TỔNG HỢP (Status, Alert, FSM, Blockchain)
+                // 🟢 LUỒNG NGHE CÁC BẢN TIN TỔNG HỢP (Alert, FSM, Blockchain)
                 alert_result = alert_rx.recv() => {
                     match alert_result {
                         Ok(alert_msg) => {
-                            // 1. Đóng gói Struct thành định dạng JSON có chứa "type"
                             let ws_msg = serde_json::json!({
                                 "type": "alert",
                                 "payload": alert_msg
                             });
 
-                            // 2. Chuyển JSON thành chuỗi String (Serialize) rồi mới gửi đi
                             if let Ok(json_str) = serde_json::to_string(&ws_msg) {
                                 if session.text(json_str).await.is_err() {
                                     break;
@@ -51,9 +50,7 @@ pub async fn ws_handler(
                         Err(RecvError::Lagged(_)) => {
                             warn!("WS Client {} is too slow, missed some alerts", client_ip);
                         }
-                        Err(RecvError::Closed) => {
-                            break;
-                        }
+                        Err(RecvError::Closed) => break,
                     }
                 }
 
@@ -72,13 +69,32 @@ pub async fn ws_handler(
                                 }
                             }
                         }
-                        // THÊM ĐOẠN NÀY ĐỂ BỎ QUA LỖI LAGGED THAY VÌ BREAK
                         Err(RecvError::Lagged(_)) => {
                             warn!("WS Client {} is too slow, missed some sensor data", client_ip);
                         }
-                        Err(RecvError::Closed) => {
-                            break;
+                        Err(RecvError::Closed) => break,
+                    }
+                }
+
+                // 🟢 MỚI: LUỒNG NGHE DEVICE HEALTH (Uptime, Ram, Rssi, PumpStatus...)
+                health_result = health_rx.recv() => {
+                    match health_result {
+                        Ok(health_data) => {
+                            let ws_msg = serde_json::json!({
+                                "type": "device_health",
+                                "payload": health_data
+                            });
+
+                            if let Ok(json_str) = serde_json::to_string(&ws_msg) {
+                                if session.text(json_str).await.is_err() {
+                                    break;
+                                }
+                            }
                         }
+                        Err(RecvError::Lagged(_)) => {
+                            warn!("WS Client {} is too slow, missed some health data", client_ip);
+                        }
+                        Err(RecvError::Closed) => break,
                     }
                 }
 
@@ -110,3 +126,4 @@ pub async fn ws_handler(
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/ws", web::get().to(ws_handler));
 }
+

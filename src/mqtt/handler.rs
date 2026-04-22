@@ -45,6 +45,12 @@ pub struct IncomingSensorPayload {
     #[serde(rename = "last_update_ms")]
     pub timestamp_ms: Option<u64>,
     pub pump_status: Option<PumpStatus>,
+
+    pub rssi: Option<i32>,
+    pub free_heap: Option<u32>,
+    pub uptime: Option<u32>,
+    pub err_water: Option<bool>,
+    pub is_continuous: Option<bool>,
 }
 
 #[instrument(skip(app_state, publish))]
@@ -53,26 +59,39 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
     let payload_bytes = publish.payload;
 
     let parts: Vec<&str> = topic.split('/').collect();
-    if parts.len() != 3 || parts[0] != "AGITECH" {
+    // 🟢 SỬA LẠI: Cho phép topic có độ dài > 3 (ví dụ: AGITECH/device_001/controller/status)
+    if parts.len() < 3 || parts[0] != "AGITECH" {
         warn!("Bỏ qua topic không đúng chuẩn hệ thống: {}", topic);
         return;
     }
 
     let device_id = parts[1].to_string();
-    let action = parts[2];
 
-    match action {
-        "sensors" => {
+    // Lấy phần đuôi của topic để match (Bắt đầu từ sau AGITECH/device_id)
+    let prefix_len = "AGITECH/".len() + device_id.len();
+    let action_path = &topic[prefix_len..];
+
+    match action_path {
+        "/sensors" => {
             handle_sensor_data(device_id, &payload_bytes, app_state).await;
         }
-        "status" => {
+        "/status" | "/sensor/status" => {
+            // Dùng chung cho LWT của cả Controller và Sensor Node
             handle_device_status(device_id, &payload_bytes, app_state).await;
         }
-        "fsm" => {
+        "/fsm" => {
             handle_fsm_state(device_id, &payload_bytes, app_state).await;
         }
-        "dosing_report" => {
+        "/dosing_report" => {
             handle_dosing_report(device_id, &payload_bytes, app_state).await;
+        }
+        "/controller/status" => {
+            // 🟢 MỚI: Bắt bản tin Sức Khỏe của Controller và đẩy thẳng ra WS
+            if let Ok(payload_json) = serde_json::from_slice::<serde_json::Value>(&payload_bytes) {
+                let _ = app_state.health_sender.send(payload_json);
+            } else {
+                warn!("Lỗi parse JSON Health Data từ {}", device_id);
+            }
         }
         _ => {
             debug!("Nhận được topic không quản lý: {}", topic);
@@ -106,6 +125,11 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         water_level: incoming.water_level.unwrap_or(0.0),
         pump_status: incoming.pump_status.unwrap_or_default(),
         time,
+        rssi: incoming.rssi,
+        free_heap: incoming.free_heap,
+        uptime: incoming.uptime,
+        err_water: incoming.err_water,
+        is_continuous: incoming.is_continuous,
     };
 
     debug!(
@@ -113,7 +137,6 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         device_id, sensor_data.ph_value, sensor_data.ec_value
     );
 
-    // 🟢 Lưu dữ liệu cảm biến vào RAM để FSM có thể trích xuất làm Metadata khi có lỗi
     if let Ok(json_str) = serde_json::to_string(&sensor_data) {
         let mut states = app_state.device_states.write().await;
         states.insert(device_id.clone(), json_str);
@@ -191,7 +214,6 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
 
                 let mut alert = None;
 
-                // 🟢 Trích xuất thông số cảm biến mới nhất từ RAM để làm Metadata
                 let current_sensors = app_state.device_states.read().await;
                 let metadata_json = if let Some(sensor_str) = current_sensors.get(&device_id) {
                     serde_json::from_str::<serde_json::Value>(sensor_str).ok()
@@ -292,7 +314,7 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             reason: Some(reason_str),
-                            metadata: metadata_json.clone(), // 🟢 Nhét Metadata vào đây!
+                            metadata: metadata_json.clone(),
                         });
                     }
                     "EmergencyStop" => {
@@ -319,7 +341,7 @@ async fn handle_fsm_state(device_id: String, payload: &[u8], app_state: web::Dat
                             device_id: device_id.clone(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             reason: Some(reason_str),
-                            metadata: metadata_json.clone(), // 🟢 Cả SystemFault cũng có Metadata!
+                            metadata: metadata_json.clone(),
                         });
                     }
                     "WaterRefilling" => {
@@ -505,7 +527,7 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
                 ),
                 device_id: device_id.clone(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                reason: None, // 🟢 Đã fix E0425
+                reason: None,
                 metadata: None,
             };
             let _ = app_state.alert_sender.send(alert);
@@ -522,11 +544,10 @@ async fn handle_dosing_report(device_id: String, payload: &[u8], app_state: web:
                 ),
                 device_id: device_id.clone(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                reason: Some(e.to_string()), // Ghi nhận lỗi mạng/Solana làm reason
+                reason: Some(e.to_string()),
                 metadata: None,
             };
             let _ = app_state.alert_sender.send(alert);
         }
     }
 }
-
