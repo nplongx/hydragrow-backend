@@ -80,9 +80,13 @@ pub async fn process_message(publish: Publish, app_state: web::Data<AppState>) {
         "/sensors" => {
             handle_sensor_data(device_id, &payload_bytes, app_state).await;
         }
-        "/status" | "/sensor/status" => {
-            // Dùng chung cho LWT của cả Controller và Sensor Node
-            handle_device_status(device_id, &payload_bytes, app_state).await;
+        "/status" => {
+            // LWT của Controller
+            handle_device_status(device_id, "Trạm Điều Khiển", &payload_bytes, app_state).await;
+        }
+        "/sensor/status" => {
+            // LWT của Sensor
+            handle_device_status(device_id, "Mạch Cảm Biến", &payload_bytes, app_state).await;
         }
         "/fsm" => {
             handle_fsm_state(device_id, &payload_bytes, app_state).await;
@@ -163,7 +167,13 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
     let _ = app_state.sensor_sender.send(sensor_data);
 }
 
-async fn handle_device_status(device_id: String, payload: &[u8], app_state: web::Data<AppState>) {
+// Thêm tham số node_type: &str
+async fn handle_device_status(
+    device_id: String,
+    node_type: &str,
+    payload: &[u8],
+    app_state: web::Data<AppState>,
+) {
     let status: DeviceStatusPayload = match serde_json::from_slice(payload) {
         Ok(data) => data,
         Err(e) => {
@@ -172,20 +182,17 @@ async fn handle_device_status(device_id: String, payload: &[u8], app_state: web:
         }
     };
 
-    info!(
-        "Thiết bị {} vừa chuyển trạng thái online: {}",
-        device_id, status.online
-    );
-
     let alert = AlertMessage {
         level: if status.online {
             "success".to_string()
         } else {
             "warning".to_string()
         },
-        title: "Trạng thái thiết bị".to_string(),
+        // 🟢 TIÊU ĐỀ SẼ LÀ: "Trạng thái Trạm Điều Khiển" hoặc "Trạng thái Mạch Cảm Biến"
+        title: format!("Trạng thái {}", node_type),
         message: format!(
-            "Thiết bị {} vừa {}",
+            "{} ({}) vừa {}",
+            node_type,
             device_id,
             if status.online {
                 "Trực tuyến"
@@ -198,7 +205,6 @@ async fn handle_device_status(device_id: String, payload: &[u8], app_state: web:
         reason: None,
         metadata: None,
     };
-
     let _ = app_state.alert_sender.send(alert);
 }
 
