@@ -49,7 +49,12 @@ pub struct IncomingSensorPayload {
     pub rssi: Option<i32>,
     pub free_heap: Option<u32>,
     pub uptime: Option<u32>,
+
     pub err_water: Option<bool>,
+    pub err_temp: Option<bool>,
+    pub err_ph: Option<bool>,
+    pub err_ec: Option<bool>,
+
     pub is_continuous: Option<bool>,
 }
 
@@ -129,6 +134,9 @@ async fn handle_sensor_data(device_id: String, payload: &[u8], app_state: web::D
         free_heap: incoming.free_heap,
         uptime: incoming.uptime,
         err_water: incoming.err_water,
+        err_temp: incoming.err_temp,
+        err_ph: incoming.err_ph,
+        err_ec: incoming.err_ec,
         is_continuous: incoming.is_continuous,
     };
 

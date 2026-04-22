@@ -59,6 +59,12 @@ pub struct SensorData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub err_water: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub err_temp: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub err_ph: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub err_ec: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_continuous: Option<bool>,
 }
 
@@ -93,6 +99,9 @@ impl From<SensorDataRow> for SensorData {
             is_continuous: None,
             uptime: None,
             err_water: None,
+            err_temp: None,
+            err_ph: None,
+            err_ec: None,
         }
     }
 }
